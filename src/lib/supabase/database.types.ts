@@ -31,6 +31,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["profiles"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["profiles"]["Row"]>;
+        Relationships: [];
       };
       businesses: {
         Row: Row<{
@@ -55,6 +56,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["businesses"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["businesses"]["Row"]>;
+        Relationships: [];
       };
       business_users: {
         Row: Row<{
@@ -68,6 +70,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["business_users"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["business_users"]["Row"]>;
+        Relationships: [];
       };
       locations: {
         Row: Row<{
@@ -83,6 +86,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["locations"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["locations"]["Row"]>;
+        Relationships: [];
       };
       location_users: {
         Row: Row<{
@@ -93,6 +97,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["location_users"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["location_users"]["Row"]>;
+        Relationships: [];
       };
       ingredient_categories: {
         Row: Row<{
@@ -105,6 +110,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["ingredient_categories"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["ingredient_categories"]["Row"]>;
+        Relationships: [];
       };
       suppliers: {
         Row: Row<{
@@ -121,6 +127,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["suppliers"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["suppliers"]["Row"]>;
+        Relationships: [];
       };
       ingredients: {
         Row: Row<{
@@ -145,6 +152,22 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["ingredients"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["ingredients"]["Row"]>;
+        Relationships: [
+          {
+            foreignKeyName: "ingredients_category_id_fkey";
+            columns: ["category_id"];
+            isOneToOne: false;
+            referencedRelation: "ingredient_categories";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ingredients_supplier_id_fkey";
+            columns: ["supplier_id"];
+            isOneToOne: false;
+            referencedRelation: "suppliers";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       recipes: {
         Row: Row<{
@@ -163,6 +186,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["recipes"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["recipes"]["Row"]>;
+        Relationships: [];
       };
       recipe_versions: {
         Row: Row<{
@@ -192,6 +216,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["recipe_versions"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["recipe_versions"]["Row"]>;
+        Relationships: [];
       };
       recipe_formula_lines: {
         Row: Row<{
@@ -212,6 +237,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["recipe_formula_lines"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["recipe_formula_lines"]["Row"]>;
+        Relationships: [];
       };
       recipe_method_steps: {
         Row: Row<{
@@ -230,6 +256,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["recipe_method_steps"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["recipe_method_steps"]["Row"]>;
+        Relationships: [];
       };
       production_batches: {
         Row: Row<{
@@ -284,6 +311,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["production_batches"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["production_batches"]["Row"]>;
+        Relationships: [];
       };
       production_ingredient_lines: {
         Row: Row<{
@@ -309,6 +337,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["production_ingredient_lines"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["production_ingredient_lines"]["Row"]>;
+        Relationships: [];
       };
       production_method_steps: {
         Row: Row<{
@@ -329,6 +358,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["production_method_steps"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["production_method_steps"]["Row"]>;
+        Relationships: [];
       };
       production_additional_costs: {
         Row: Row<{
@@ -345,6 +375,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["production_additional_costs"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["production_additional_costs"]["Row"]>;
+        Relationships: [];
       };
       production_notes: {
         Row: Row<{
@@ -357,6 +388,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["production_notes"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["production_notes"]["Row"]>;
+        Relationships: [];
       };
       production_images: {
         Row: Row<{
@@ -370,6 +402,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["production_images"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["production_images"]["Row"]>;
+        Relationships: [];
       };
       recipe_images: {
         Row: Row<{
@@ -383,6 +416,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["recipe_images"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["recipe_images"]["Row"]>;
+        Relationships: [];
       };
       ingredient_images: {
         Row: Row<{
@@ -396,6 +430,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["ingredient_images"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["ingredient_images"]["Row"]>;
+        Relationships: [];
       };
       audit_logs: {
         Row: Row<{
@@ -411,6 +446,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["audit_logs"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["audit_logs"]["Row"]>;
+        Relationships: [];
       };
       ingredient_imports: {
         Row: Row<{
@@ -430,6 +466,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["ingredient_imports"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["ingredient_imports"]["Row"]>;
+        Relationships: [];
       };
       ingredient_import_rows: {
         Row: Row<{
@@ -444,6 +481,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["ingredient_import_rows"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["ingredient_import_rows"]["Row"]>;
+        Relationships: [];
       };
       units_of_measure: {
         Row: Row<{
@@ -454,6 +492,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["units_of_measure"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["units_of_measure"]["Row"]>;
+        Relationships: [];
       };
       production_statuses: {
         Row: Row<{
@@ -464,6 +503,7 @@ export type Database = {
         }>;
         Insert: Insert<Database["public"]["Tables"]["production_statuses"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["production_statuses"]["Row"]>;
+        Relationships: [];
       };
     };
     Views: Record<string, never>;

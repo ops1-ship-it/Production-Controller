@@ -23,7 +23,12 @@ import {
 } from "@/src/lib/business/countries";
 import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
 import { normalizeSupabaseError } from "@/src/lib/supabase/errors";
-import type { Json, Tables, TablesUpdate } from "@/src/lib/supabase/types";
+import type {
+  Json,
+  Tables,
+  TablesInsert,
+  TablesUpdate,
+} from "@/src/lib/supabase/types";
 
 type Unit =
   | "kg"
@@ -92,6 +97,18 @@ type AdditionalCost = {
   rate: number;
   notes: string;
 };
+
+type ProfileDefaults = Pick<
+  Tables<"profiles">,
+  "default_business_id" | "default_location_id"
+>;
+
+type LocationMembershipDefaults = Pick<Tables<"location_users">, "location_id">;
+
+type BusinessCurrencyDefaults = Pick<
+  Tables<"businesses">,
+  "country_code" | "currency_code" | "currency_symbol"
+>;
 
 type Recipe = {
   id: string;
@@ -1288,6 +1305,7 @@ export default function RecipeCostApp({
         .select("default_business_id, default_location_id")
         .eq("id", user.id)
         .maybeSingle();
+      const profile = profileData as ProfileDefaults | null;
 
       const membershipQuery = supabase
         .from("business_users")
@@ -1297,9 +1315,9 @@ export default function RecipeCostApp({
         .limit(1);
 
       const { data: membershipData, error: membershipError } =
-        profileData?.default_business_id
+        profile?.default_business_id
           ? await membershipQuery
-              .eq("business_id", profileData.default_business_id)
+              .eq("business_id", profile.default_business_id)
               .maybeSingle()
           : await membershipQuery.maybeSingle();
 
@@ -1323,11 +1341,13 @@ export default function RecipeCostApp({
         .eq("user_id", user.id)
         .limit(1)
         .maybeSingle();
+      const userLocation =
+        locationMembership as LocationMembershipDefaults | null;
 
       const businessId = membership.business_id;
       const locationId =
-        profileData?.default_location_id ??
-        locationMembership?.location_id ??
+        profile?.default_location_id ??
+        userLocation?.location_id ??
         null;
 
       const { data: businessData, error: businessError } = await supabase
@@ -1337,6 +1357,7 @@ export default function RecipeCostApp({
         .maybeSingle();
 
       if (businessError) throw businessError;
+      const business = businessData as BusinessCurrencyDefaults | null;
 
       const [
         ingredientsResult,
@@ -1389,12 +1410,15 @@ export default function RecipeCostApp({
       const ingredientRows = (ingredientsResult.data ?? []) as IngredientSelect[];
       const categoryRows = (categoriesResult.data ?? []) as IngredientLookup[];
       const supplierRows = (suppliersResult.data ?? []) as IngredientLookup[];
-      const recipeRowsFromDb = recipesResult.data ?? [];
-      const currentVersions = (versionsResult.data ?? []).filter((version) =>
+      const recipeRowsFromDb = (recipesResult.data ?? []) as Tables<"recipes">[];
+      const currentVersions = (
+        (versionsResult.data ?? []) as Tables<"recipe_versions">[]
+      ).filter((version) =>
         recipeRowsFromDb.some((recipe) => recipe.id === version.recipe_id),
       );
       const versionIds = currentVersions.map((version) => version.id);
-      const productionRows = productionResult.data ?? [];
+      const productionRows =
+        (productionResult.data ?? []) as Tables<"production_batches">[];
       const productionIds = productionRows.map((production) => production.id);
 
       const [formulaResult, methodResult, productionLineResult, productionMethodResult, costResult] =
@@ -1486,11 +1510,11 @@ export default function RecipeCostApp({
         locationId,
         userId: user.id,
         userEmail: user.email ?? "",
-        countryCode: businessData?.country_code ?? defaultCountryCurrency.countryCode,
+        countryCode: business?.country_code ?? defaultCountryCurrency.countryCode,
         currencyCode:
-          businessData?.currency_code ?? defaultCountryCurrency.defaultCurrencyCode,
+          business?.currency_code ?? defaultCountryCurrency.defaultCurrencyCode,
         currencySymbol:
-          businessData?.currency_symbol ?? defaultCountryCurrency.currencySymbol,
+          business?.currency_symbol ?? defaultCountryCurrency.currencySymbol,
       });
       setActiveRecipeId((current) =>
         mappedRecipes.some((recipe) => recipe.id === current)
@@ -2059,8 +2083,8 @@ export default function RecipeCostApp({
       }
 
       const skippedAtSave: IngredientImportDraftRow[] = [];
-      const addPayload: Record<string, unknown>[] = [];
-      const updatePayload: Record<string, unknown>[] = [];
+      const addPayload: TablesInsert<"ingredients">[] = [];
+      const updatePayload: TablesInsert<"ingredients">[] = [];
 
       rowsToImport.forEach((row) => {
         const categoryId = row.category
@@ -2078,7 +2102,7 @@ export default function RecipeCostApp({
           return;
         }
 
-        const payload = {
+        const payload: TablesInsert<"ingredients"> = {
           business_id: context.businessId,
           category_id: categoryId ?? null,
           supplier_id: supplierId ?? null,
@@ -2414,6 +2438,7 @@ export default function RecipeCostApp({
     const recipe = recipes.find((item) => item.id === recipeId);
     const targetLine = recipe?.formulaLines.find((line) => line.id === lineId);
     if (!recipe || !targetLine?.recipeVersionId) return;
+    const recipeVersionId = targetLine.recipeVersionId;
     setRecipes((current) =>
       current.map((recipe) =>
         recipe.id === recipeId
@@ -2433,7 +2458,7 @@ export default function RecipeCostApp({
       const { error: resetError } = await supabase
         .from("recipe_formula_lines")
         .update({ is_main_ingredient: false })
-        .eq("recipe_version_id", targetLine.recipeVersionId);
+        .eq("recipe_version_id", recipeVersionId);
       if (resetError) throw resetError;
       const { error } = await supabase
         .from("recipe_formula_lines")

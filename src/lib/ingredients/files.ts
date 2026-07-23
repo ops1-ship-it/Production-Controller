@@ -424,7 +424,9 @@ async function inflateRaw(bytes: Uint8Array) {
   if (typeof DecompressionStream === "undefined") {
     throw new Error("This browser cannot read compressed XLSX files.");
   }
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  const stream = new Blob([buffer]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 

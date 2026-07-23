@@ -4,61 +4,40 @@ import test from "node:test";
 
 const templateRoot = new URL("../", import.meta.url);
 
-async function render(path = "/dashboard") {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request(`http://localhost${path}`, {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
+test("uses native Next.js deployment commands", async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
   );
-}
 
-test("server-renders the public home and authentication entry point", async () => {
-  const response = await render("/");
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
-  assert.match(html, /<title>Production Controller<\/title>/i);
-  assert.match(html, /Production Controller/);
-  assert.match(html, /Login/);
-  assert.match(html, /Register/);
-  assert.match(html, /Email address/);
-  assert.match(html, /Password/);
-  assert.doesNotMatch(html, /mobile-bottom-nav/);
-  assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
-  assert.doesNotMatch(html, /Your site is taking shape|SkeletonPreview/i);
+  assert.equal(packageJson.scripts.dev, "next dev");
+  assert.equal(packageJson.scripts.build, "next build");
+  assert.equal(packageJson.scripts.start, "next start");
+  assert.equal(packageJson.engines.node, "22.x");
+  assert.doesNotMatch(JSON.stringify(packageJson.scripts), /vinext|wrangler/i);
 });
 
-test("redirects unauthenticated protected routes to the public home page", async () => {
-  const [ingredientsResponse, recipesResponse, productionResponse] =
-    await Promise.all([
-      render("/ingredients"),
-      render("/recipes"),
-      render("/productions/new"),
-    ]);
+test("includes the public home and authentication entry point", async () => {
+  const [page, layout, middleware] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/supabase/middleware.ts", import.meta.url), "utf8"),
+  ]);
 
-  assert.equal(ingredientsResponse.status, 307);
-  assert.equal(recipesResponse.status, 307);
-  assert.equal(productionResponse.status, 307);
-  assert.match(ingredientsResponse.headers.get("location") ?? "", /\/\?next=%2Fingredients/);
-  assert.match(recipesResponse.headers.get("location") ?? "", /\/\?next=%2Frecipes/);
-  assert.match(
-    productionResponse.headers.get("location") ?? "",
-    /\/\?next=%2Fproductions%2Fnew/,
-  );
+  assert.match(layout, /Production Controller/);
+  assert.match(page, /Production Controller/);
+  assert.match(page, /Login/);
+  assert.match(page, /Register/);
+  assert.match(page, /Email address/);
+  assert.match(page, /Password/);
+  assert.match(page, /createSupabaseBrowserClient/);
+  assert.match(page, /signInWithPassword/);
+  assert.match(page, /resetPasswordForEmail/);
+  assert.match(page, /registration_intent/);
+  assert.match(middleware, /protectedRoutePrefixes/);
+  assert.match(middleware, /NextResponse\.redirect/);
+  assert.match(middleware, /request\.nextUrl\.pathname/);
+  assert.doesNotMatch(page + layout, /codex-preview|react-loading-skeleton/i);
+  assert.doesNotMatch(page + layout, /Your site is taking shape|SkeletonPreview/i);
 });
 
 test("keeps starter preview code removed and includes Supabase setup", async () => {

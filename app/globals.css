@@ -466,6 +466,7 @@ a {
 }
 
 .panel + .panel,
+.panel + .hero-grid,
 .panel + .two-column-section,
 .two-column-section + .panel {
   margin-top: 12px;
@@ -500,6 +501,14 @@ a {
     minmax(138px, 1.45fr) minmax(96px, 0.95fr) minmax(92px, 0.8fr)
     minmax(136px, 1fr) minmax(66px, 0.55fr) minmax(90px, 0.75fr)
     46px minmax(110px, 1fr) 116px;
+}
+
+.recipe-sheet .sheet-head,
+.recipe-sheet .sheet-row {
+  grid-template-columns:
+    minmax(112px, 1.35fr) minmax(64px, 0.7fr) minmax(68px, 0.72fr)
+    minmax(84px, 0.9fr) minmax(38px, 0.42fr) minmax(76px, 0.78fr)
+    minmax(82px, 0.9fr) minmax(58px, 0.62fr) minmax(76px, 0.78fr) 84px;
 }
 
 .production-sheet .sheet-head,
@@ -559,6 +568,14 @@ a {
   background: #fcfdff;
 }
 
+.selected-row span {
+  background: var(--blue-soft);
+}
+
+.selected-row:hover span {
+  background: #e9f1ff;
+}
+
 .sheet-row small {
   display: inline-flex;
   margin-left: 6px;
@@ -614,6 +631,20 @@ a {
 .warning-text {
   color: var(--amber);
   font-weight: 700;
+}
+
+.muted-status {
+  height: 22px;
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.sheet-empty {
+  min-height: 34px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  padding: 8px;
 }
 
 .toggle-mini,
@@ -796,6 +827,26 @@ a {
 
 .record-metric strong {
   font-variant-numeric: tabular-nums;
+}
+
+.record-actions {
+  display: flex;
+  gap: 6px;
+  grid-column: 1 / -1;
+}
+
+.record-actions button {
+  flex: 1;
+}
+
+.delete-button {
+  border-color: #ef9a96;
+  color: var(--red);
+}
+
+.empty-record {
+  padding: 9px;
+  color: var(--muted);
 }
 
 .action-strip {

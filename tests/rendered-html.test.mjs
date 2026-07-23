@@ -33,6 +33,11 @@ test("server-renders the recipe costing application", async () => {
   const html = await response.text();
   assert.match(html, /<title>Recipe Cost Calculator<\/title>/i);
   assert.match(html, /Recipe Formula \/ Production \/ Costing/);
+  assert.match(html, /Saved formulas are stored here for editing or removal/);
+  assert.match(html, /Coriander Biltong Slab/);
+  assert.match(html, /Vinegar Beef Jerky/);
+  assert.match(html, />Edit</);
+  assert.match(html, />Delete</);
   assert.match(html, /Production scaler/);
   assert.match(html, /Live costing/);
   assert.match(html, /Formula builder/);
@@ -54,12 +59,16 @@ test("keeps starter preview code removed", async () => {
   assert.match(packageJson, /"name": "recipe-cost-calculator"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(page, /function convertQuantity/);
+  assert.match(page, /savedRecipesStorageKey/);
+  assert.match(page, /const loadSavedRecipe/);
+  assert.match(page, /const deleteSavedRecipe/);
   assert.match(page, /Production scaler/);
   assert.match(page, /Markup/);
   assert.match(page, /Gross Margin/);
   assert.match(layout, /generateMetadata/);
   assert.match(layout, /og\.png/);
   assert.match(css, /@media \(max-width: 820px\)/);
+  assert.match(css, /\.recipe-sheet/);
   assert.match(css, /\.mobile-records/);
   assert.doesNotMatch(page + layout + css, /codex-preview|_sites-preview/);
 

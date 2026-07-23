@@ -59,10 +59,33 @@ type AdditionalCost = {
   notes: string;
 };
 
+type Recipe = {
+  name: string;
+  code: string;
+  category: string;
+  description: string;
+  expectedYield: number;
+  yieldUnit: Unit;
+  pricingMethod: string;
+  profitPercentage: number;
+  status: string;
+  image: string;
+  version: string;
+};
+
+type SavedRecipe = Recipe & {
+  id: string;
+  updatedAt: string;
+  formulaLines: FormulaLine[];
+  methodSteps: MethodStep[];
+};
+
 type Toast = {
   kind: "success" | "failed" | "warning" | "info";
   message: string;
 };
+
+const savedRecipesStorageKey = "recipe-cost-calculator:saved-recipes";
 
 const units: Unit[] = [
   "kg",
@@ -283,6 +306,218 @@ const initialMethodSteps: MethodStep[] = [
   },
 ];
 
+const initialRecipe: Recipe = {
+  name: "Peppered Silverside",
+  code: "BEEF-SILV-001",
+  category: "Cured Meat",
+  description: "Scalable base formula for peppered silverside batches.",
+  expectedYield: 0.9,
+  yieldUnit: "kg",
+  pricingMethod: "Gross Margin",
+  profitPercentage: 42,
+  status: "Active",
+  image: "",
+  version: "1.0",
+};
+
+const initialSavedRecipes: SavedRecipe[] = [
+  {
+    ...initialRecipe,
+    id: "recipe-silverside",
+    updatedAt: "23 Jul 2026, 09:42",
+    formulaLines: initialFormulaLines,
+    methodSteps: initialMethodSteps,
+  },
+  {
+    id: "recipe-biltong",
+    name: "Coriander Biltong Slab",
+    code: "BEEF-BILT-002",
+    category: "Dried Meat",
+    description: "Leaner biltong formula with heavier coriander and drying loss.",
+    expectedYield: 0.62,
+    yieldUnit: "kg",
+    pricingMethod: "Gross Margin",
+    profitPercentage: 48,
+    status: "Active",
+    image: "",
+    version: "1.2",
+    updatedAt: "22 Jul 2026, 15:18",
+    formulaLines: [
+      {
+        id: "biltong-silverside",
+        ingredientId: "silverside",
+        quantity: 1,
+        unit: "kg",
+        isMain: true,
+        optional: false,
+        wastage: 0,
+        notes: "Trim lean",
+      },
+      {
+        id: "biltong-salt",
+        ingredientId: "coarse-salt",
+        quantity: 24,
+        unit: "g",
+        isMain: false,
+        optional: false,
+        wastage: 0,
+        notes: "",
+      },
+      {
+        id: "biltong-coriander",
+        ingredientId: "coriander",
+        quantity: 18,
+        unit: "g",
+        isMain: false,
+        optional: false,
+        wastage: 3,
+        notes: "Toasted and cracked",
+      },
+      {
+        id: "biltong-pepper",
+        ingredientId: "black-pepper",
+        quantity: 5,
+        unit: "g",
+        isMain: false,
+        optional: false,
+        wastage: 0,
+        notes: "",
+      },
+      {
+        id: "biltong-vinegar",
+        ingredientId: "vinegar",
+        quantity: 120,
+        unit: "ml",
+        isMain: false,
+        optional: false,
+        wastage: 0,
+        notes: "Dip before curing",
+      },
+    ],
+    methodSteps: [
+      {
+        id: "biltong-step-1",
+        title: "Cut slabs",
+        instructions: "Trim and cut even slabs before weighing the batch.",
+        duration: "12 min",
+        temperature: "Chilled",
+        equipment: "Scale, knife",
+        image: "",
+        notes: "",
+      },
+      {
+        id: "biltong-step-2",
+        title: "Cure",
+        instructions: "Apply dry cure and rest under refrigeration.",
+        duration: "12 h",
+        temperature: "2-5 C",
+        equipment: "Food-safe tub",
+        image: "",
+        notes: "",
+      },
+      {
+        id: "biltong-step-3",
+        title: "Dry",
+        instructions: "Hang until target moisture loss is reached.",
+        duration: "72 h",
+        temperature: "18-22 C",
+        equipment: "Drying cabinet",
+        image: "",
+        notes: "Record final yield before packing.",
+      },
+    ],
+  },
+  {
+    id: "recipe-jerky",
+    name: "Vinegar Beef Jerky",
+    code: "BEEF-JERK-003",
+    category: "Snack",
+    description: "Thin-cut jerky batch with higher vinegar marinade ratio.",
+    expectedYield: 0.52,
+    yieldUnit: "kg",
+    pricingMethod: "Markup",
+    profitPercentage: 75,
+    status: "Draft",
+    image: "",
+    version: "0.8",
+    updatedAt: "21 Jul 2026, 11:05",
+    formulaLines: [
+      {
+        id: "jerky-silverside",
+        ingredientId: "silverside",
+        quantity: 1,
+        unit: "kg",
+        isMain: true,
+        optional: false,
+        wastage: 0,
+        notes: "Slice thin",
+      },
+      {
+        id: "jerky-vinegar",
+        ingredientId: "vinegar",
+        quantity: 220,
+        unit: "ml",
+        isMain: false,
+        optional: false,
+        wastage: 0,
+        notes: "Marinade",
+      },
+      {
+        id: "jerky-salt",
+        ingredientId: "coarse-salt",
+        quantity: 18,
+        unit: "g",
+        isMain: false,
+        optional: false,
+        wastage: 0,
+        notes: "",
+      },
+      {
+        id: "jerky-pepper",
+        ingredientId: "black-pepper",
+        quantity: 8,
+        unit: "g",
+        isMain: false,
+        optional: false,
+        wastage: 0,
+        notes: "",
+      },
+      {
+        id: "jerky-coriander",
+        ingredientId: "coriander",
+        quantity: 6,
+        unit: "g",
+        isMain: false,
+        optional: true,
+        wastage: 0,
+        notes: "Optional batch note",
+      },
+    ],
+    methodSteps: [
+      {
+        id: "jerky-step-1",
+        title: "Slice",
+        instructions: "Slice silverside evenly for fast drying.",
+        duration: "18 min",
+        temperature: "Chilled",
+        equipment: "Slicer, scale",
+        image: "",
+        notes: "",
+      },
+      {
+        id: "jerky-step-2",
+        title: "Marinate",
+        instructions: "Mix marinade and rest under refrigeration.",
+        duration: "8 h",
+        temperature: "2-5 C",
+        equipment: "Tub, gloves",
+        image: "",
+        notes: "",
+      },
+    ],
+  },
+];
+
 function makeId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
@@ -314,6 +549,53 @@ function ingredientBaseCost(ingredient: Ingredient) {
 
   if (convertedPurchaseQuantity <= 0) return 0;
   return ingredient.purchaseCost / convertedPurchaseQuantity;
+}
+
+function cloneFormulaLines(lines: FormulaLine[]) {
+  return lines.map((line) => ({ ...line }));
+}
+
+function cloneMethodSteps(steps: MethodStep[]) {
+  return steps.map((step) => ({ ...step }));
+}
+
+function formulaCostForLines(
+  lines: FormulaLine[],
+  ingredientMap: Map<string, Ingredient>,
+) {
+  return lines.reduce((sum, line) => {
+    const ingredient = ingredientMap.get(line.ingredientId);
+    if (!ingredient) return sum;
+    const convertedQuantity = convertQuantity(
+      line.quantity,
+      line.unit,
+      ingredient.baseUnit,
+    );
+    return (
+      sum +
+      convertedQuantity * ingredientBaseCost(ingredient) * (1 + line.wastage / 100)
+    );
+  }, 0);
+}
+
+function recipeMainIngredientName(
+  lines: FormulaLine[],
+  ingredientMap: Map<string, Ingredient>,
+) {
+  const mainLine = lines.find((line) => line.isMain) ?? lines[0];
+  return mainLine
+    ? (ingredientMap.get(mainLine.ingredientId)?.name ?? "Unassigned")
+    : "Unassigned";
+}
+
+function recipeFieldsFromSaved(savedRecipe: SavedRecipe): Recipe {
+  const { id, updatedAt, formulaLines, methodSteps, ...recipeFields } =
+    savedRecipe;
+  void id;
+  void updatedAt;
+  void formulaLines;
+  void methodSteps;
+  return recipeFields;
 }
 
 function formatNumber(value: number, digits = 2) {
@@ -409,24 +691,17 @@ export default function Home() {
   const [ingredients, setIngredients] = useState(initialIngredients);
   const [formulaLines, setFormulaLines] = useState(initialFormulaLines);
   const [methodSteps, setMethodSteps] = useState(initialMethodSteps);
+  const [savedRecipes, setSavedRecipes] = useState(initialSavedRecipes);
+  const [activeRecipeId, setActiveRecipeId] = useState<string | null>(
+    "recipe-silverside",
+  );
+  const [recipesLoaded, setRecipesLoaded] = useState(false);
   const [draggingStepId, setDraggingStepId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [savingBatch, setSavingBatch] = useState(false);
 
-  const [recipe, setRecipe] = useState({
-    name: "Peppered Silverside",
-    code: "BEEF-SILV-001",
-    category: "Cured Meat",
-    description: "Scalable base formula for peppered silverside batches.",
-    expectedYield: 0.9,
-    yieldUnit: "kg" as Unit,
-    pricingMethod: "Gross Margin",
-    profitPercentage: 42,
-    status: "Active",
-    image: "",
-    version: "1.0",
-  });
+  const [recipe, setRecipe] = useState<Recipe>(initialRecipe);
 
   const [production, setProduction] = useState({
     batchNumber: "PB-2026-0001",
@@ -484,6 +759,43 @@ export default function Home() {
   });
 
   useEffect(() => {
+    try {
+      const storedRecipes = window.localStorage.getItem(savedRecipesStorageKey);
+      if (storedRecipes) {
+        const parsedRecipes = JSON.parse(storedRecipes);
+        if (
+          Array.isArray(parsedRecipes) &&
+          parsedRecipes.length > 0 &&
+          parsedRecipes[0].formulaLines
+        ) {
+          const restoredRecipes = parsedRecipes as SavedRecipe[];
+          const restoredRecipe = restoredRecipes[0];
+          setSavedRecipes(restoredRecipes);
+          setActiveRecipeId(restoredRecipe.id);
+          setRecipe(recipeFieldsFromSaved(restoredRecipe));
+          setFormulaLines(cloneFormulaLines(restoredRecipe.formulaLines));
+          setMethodSteps(cloneMethodSteps(restoredRecipe.methodSteps ?? []));
+        }
+      }
+    } catch {
+      setToast({
+        kind: "warning",
+        message: "Saved recipes could not be loaded on this device.",
+      });
+    } finally {
+      setRecipesLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!recipesLoaded) return;
+    window.localStorage.setItem(
+      savedRecipesStorageKey,
+      JSON.stringify(savedRecipes),
+    );
+  }, [recipesLoaded, savedRecipes]);
+
+  useEffect(() => {
     if (!toast) return;
     const timeout = window.setTimeout(
       () => setToast(null),
@@ -495,6 +807,21 @@ export default function Home() {
   const ingredientMap = useMemo(
     () => new Map(ingredients.map((ingredient) => [ingredient.id, ingredient])),
     [ingredients],
+  );
+
+  const savedRecipeRows = useMemo(
+    () =>
+      savedRecipes.map((savedRecipe) => ({
+        ...savedRecipe,
+        lineCount: savedRecipe.formulaLines.length,
+        methodStepCount: savedRecipe.methodSteps.length,
+        mainIngredientName: recipeMainIngredientName(
+          savedRecipe.formulaLines,
+          ingredientMap,
+        ),
+        formulaCost: formulaCostForLines(savedRecipe.formulaLines, ingredientMap),
+      })),
+    [ingredientMap, savedRecipes],
   );
 
   const mainLine = useMemo(
@@ -670,6 +997,117 @@ export default function Home() {
     }));
   };
 
+  const loadSavedRecipe = (savedRecipe: SavedRecipe) => {
+    setActiveRecipeId(savedRecipe.id);
+    setRecipe(recipeFieldsFromSaved(savedRecipe));
+    setFormulaLines(cloneFormulaLines(savedRecipe.formulaLines));
+    setMethodSteps(cloneMethodSteps(savedRecipe.methodSteps));
+    setUsageOverrides({});
+    setPricing((current) => ({
+      ...current,
+      method: savedRecipe.pricingMethod,
+      percentage: savedRecipe.profitPercentage,
+    }));
+    showToast("success", `${savedRecipe.name} loaded for editing.`);
+  };
+
+  const saveCurrentRecipe = () => {
+    const savedId = activeRecipeId ?? makeId("recipe");
+    const updatedAt = new Intl.DateTimeFormat("en-ZA", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date());
+    const savedRecipe: SavedRecipe = {
+      ...recipe,
+      id: savedId,
+      updatedAt,
+      formulaLines: cloneFormulaLines(formulaLines),
+      methodSteps: cloneMethodSteps(methodSteps),
+    };
+
+    setSavedRecipes((current) => {
+      const exists = current.some((item) => item.id === savedId);
+      if (exists) {
+        return current.map((item) => (item.id === savedId ? savedRecipe : item));
+      }
+      return [savedRecipe, ...current];
+    });
+    setActiveRecipeId(savedId);
+  };
+
+  const createNewRecipe = () => {
+    const firstActiveIngredient =
+      ingredients.find((ingredient) => ingredient.active)?.id ?? "";
+    setActiveRecipeId(null);
+    setRecipe({
+      name: "Untitled Recipe",
+      code: `REC-${Date.now().toString(36).slice(-5).toUpperCase()}`,
+      category: "New",
+      description: "",
+      expectedYield: 1,
+      yieldUnit: "kg",
+      pricingMethod: "Gross Margin",
+      profitPercentage: 40,
+      status: "Draft",
+      image: "",
+      version: "0.1",
+    });
+    setFormulaLines([
+      {
+        id: makeId("formula"),
+        ingredientId: firstActiveIngredient,
+        quantity: 1,
+        unit: "kg",
+        isMain: true,
+        optional: false,
+        wastage: 0,
+        notes: "Scaling ingredient",
+      },
+    ]);
+    setMethodSteps([]);
+    setUsageOverrides({});
+    setPricing((current) => ({
+      ...current,
+      method: "Gross Margin",
+      percentage: 40,
+    }));
+    showToast("info", "New unsaved recipe opened.");
+  };
+
+  const deleteSavedRecipe = (id: string) => {
+    const recipeToDelete = savedRecipes.find((item) => item.id === id);
+    const replacement = savedRecipes.find((item) => item.id !== id);
+
+    setSavedRecipes((current) => current.filter((item) => item.id !== id));
+
+    if (activeRecipeId === id) {
+      if (replacement) {
+        setActiveRecipeId(replacement.id);
+        setRecipe(recipeFieldsFromSaved(replacement));
+        setFormulaLines(cloneFormulaLines(replacement.formulaLines));
+        setMethodSteps(cloneMethodSteps(replacement.methodSteps));
+        setPricing((current) => ({
+          ...current,
+          method: replacement.pricingMethod,
+          percentage: replacement.profitPercentage,
+        }));
+      } else {
+        setActiveRecipeId(null);
+      }
+      setUsageOverrides({});
+    }
+
+    showToast(
+      "warning",
+      recipeToDelete
+        ? `${recipeToDelete.name} deleted.`
+        : "Recipe could not be found.",
+    );
+  };
+
   const addIngredient = () => {
     setIngredients((current) => [
       ...current,
@@ -779,6 +1217,7 @@ export default function Home() {
     if (target === "recipe") {
       setSavingRecipe(true);
       window.setTimeout(() => {
+        saveCurrentRecipe();
         setSavingRecipe(false);
         showToast("success", "Recipe saved successfully.");
       }, 700);
@@ -835,6 +1274,7 @@ export default function Home() {
           </span>
         </div>
         <nav>
+          <a href="#recipes">Recipes</a>
           <a href="#formula">Formula</a>
           <a href="#production">Production</a>
           <a href="#ingredients">Ingredients</a>
@@ -871,6 +1311,154 @@ export default function Home() {
             </button>
           </div>
         </header>
+
+        <section className="panel" id="recipes">
+          <div className="section-title">
+            <div>
+              <h2>Recipes</h2>
+              <p>Saved formulas are stored here for editing or removal.</p>
+            </div>
+            <button
+              type="button"
+              className="compact-button"
+              onClick={createNewRecipe}
+            >
+              + Recipe
+            </button>
+          </div>
+
+          <div className="sheet recipe-sheet" role="table" aria-label="Saved recipes">
+            <div className="sheet-head" role="row">
+              <span role="columnheader">Recipe</span>
+              <span role="columnheader">Code</span>
+              <span role="columnheader">Category</span>
+              <span role="columnheader">Main</span>
+              <span role="columnheader">Lines</span>
+              <span role="columnheader">Formula cost</span>
+              <span role="columnheader">Pricing</span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Updated</span>
+              <span role="columnheader">Actions</span>
+            </div>
+            {savedRecipeRows.map((savedRecipe) => (
+              <div
+                className={`sheet-row ${
+                  savedRecipe.id === activeRecipeId ? "selected-row" : ""
+                }`}
+                role="row"
+                key={savedRecipe.id}
+              >
+                <span role="cell">
+                  <strong>{savedRecipe.name}</strong>
+                  {savedRecipe.id === activeRecipeId ? <small>Editing</small> : null}
+                </span>
+                <span role="cell" className="muted-cell">
+                  {savedRecipe.code}
+                </span>
+                <span role="cell" className="muted-cell">
+                  {savedRecipe.category}
+                </span>
+                <span role="cell" className="muted-cell">
+                  {savedRecipe.mainIngredientName}
+                </span>
+                <span role="cell" className="numeric-cell">
+                  {savedRecipe.lineCount}
+                </span>
+                <span role="cell" className="numeric-cell strong-cell">
+                  {formatCurrency(savedRecipe.formulaCost)}
+                </span>
+                <span role="cell" className="muted-cell">
+                  {savedRecipe.pricingMethod} {formatNumber(savedRecipe.profitPercentage, 1)}%
+                </span>
+                <span role="cell">
+                  <strong className="status-chip muted-status">
+                    {savedRecipe.status}
+                  </strong>
+                </span>
+                <span role="cell" className="muted-cell">
+                  {savedRecipe.updatedAt}
+                </span>
+                <span role="cell" className="action-cell">
+                  <button
+                    type="button"
+                    className="compact-button"
+                    onClick={() => loadSavedRecipe(savedRecipe)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button danger"
+                    aria-label={`Delete ${savedRecipe.name}`}
+                    title="Delete"
+                    onClick={() => deleteSavedRecipe(savedRecipe.id)}
+                  >
+                    X
+                  </button>
+                </span>
+              </div>
+            ))}
+            {savedRecipeRows.length === 0 ? (
+              <div className="sheet-empty">No saved recipes</div>
+            ) : null}
+          </div>
+
+          <div className="mobile-records" aria-label="Saved recipes mobile">
+            {savedRecipeRows.map((savedRecipe) => (
+              <details className="sheet-record" key={savedRecipe.id}>
+                <summary>
+                  <span>
+                    <strong>{savedRecipe.name}</strong>
+                    <small>
+                      {savedRecipe.code} / {savedRecipe.mainIngredientName}
+                    </small>
+                  </span>
+                  <span>{formatCurrency(savedRecipe.formulaCost)}</span>
+                </summary>
+                <div className="record-grid">
+                  <div className="record-metric">
+                    <span>Status</span>
+                    <strong>{savedRecipe.status}</strong>
+                  </div>
+                  <div className="record-metric">
+                    <span>Formula lines</span>
+                    <strong>{savedRecipe.lineCount}</strong>
+                  </div>
+                  <div className="record-metric">
+                    <span>Pricing</span>
+                    <strong>
+                      {savedRecipe.pricingMethod}{" "}
+                      {formatNumber(savedRecipe.profitPercentage, 1)}%
+                    </strong>
+                  </div>
+                  <div className="record-metric">
+                    <span>Updated</span>
+                    <strong>{savedRecipe.updatedAt}</strong>
+                  </div>
+                  <div className="record-actions">
+                    <button
+                      type="button"
+                      className="compact-button"
+                      onClick={() => loadSavedRecipe(savedRecipe)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="compact-button delete-button"
+                      onClick={() => deleteSavedRecipe(savedRecipe.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </details>
+            ))}
+            {savedRecipeRows.length === 0 ? (
+              <div className="sheet-record empty-record">No saved recipes</div>
+            ) : null}
+          </div>
+        </section>
 
         <section className="hero-grid" aria-label="Batch scaling summary">
           <div className="scale-panel" id="formula">

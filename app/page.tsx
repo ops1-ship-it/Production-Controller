@@ -852,6 +852,7 @@ export default function RecipeCostApp({
   const [supplierFilter, setSupplierFilter] = useState("All");
   const [activeFilter, setActiveFilter] = useState("All");
   const [toast, setToast] = useState<Toast | null>(null);
+  const [hasLoadedStoredData, setHasLoadedStoredData] = useState(false);
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [startingProduction, setStartingProduction] = useState(false);
   const [productionDraft, setProductionDraft] = useState({
@@ -873,27 +874,40 @@ export default function RecipeCostApp({
   }, []);
 
   useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(storageKey);
-      if (!stored) return;
-      const parsed = JSON.parse(stored) as Partial<AppData>;
-      if (parsed.ingredients?.length) setIngredients(parsed.ingredients);
-      if (parsed.recipes?.length) setRecipes(parsed.recipes);
-      if (parsed.productions?.length) setProductions(parsed.productions);
-    } catch {
-      setToast({
-        kind: "warning",
-        message: "Saved local application data could not be loaded.",
-      });
-    }
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      try {
+        const stored = window.localStorage.getItem(storageKey);
+        if (!stored) return;
+        const parsed = JSON.parse(stored) as Partial<AppData>;
+        if (cancelled) return;
+        if (parsed.ingredients?.length) setIngredients(parsed.ingredients);
+        if (parsed.recipes?.length) setRecipes(parsed.recipes);
+        if (parsed.productions?.length) setProductions(parsed.productions);
+      } catch {
+        if (!cancelled) {
+          setToast({
+            kind: "warning",
+            message: "Saved local application data could not be loaded.",
+          });
+        }
+      } finally {
+        if (!cancelled) setHasLoadedStoredData(true);
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
   }, []);
 
   useEffect(() => {
+    if (!hasLoadedStoredData) return;
     window.localStorage.setItem(
       storageKey,
       JSON.stringify({ ingredients, recipes, productions }),
     );
-  }, [ingredients, productions, recipes]);
+  }, [hasLoadedStoredData, ingredients, productions, recipes]);
 
   useEffect(() => {
     if (!toast) return;
@@ -2820,6 +2834,7 @@ export default function RecipeCostApp({
             <div><strong>Production statuses</strong><small>Draft, In Progress, Resting, Drying, Awaiting Review, On Hold, Completed, Cancelled</small></div>
             <div><strong>Historical costing</strong><small>Completed productions retain formula, method and ingredient cost snapshots.</small></div>
             <div><strong>Pricing methods</strong><small>Markup and Gross Margin are calculated separately.</small></div>
+            <div><strong>Additional cost types</strong><small>{additionalCostTypes.join(", ")}</small></div>
           </div>
         </section>
       </section>

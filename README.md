@@ -1,98 +1,85 @@
-# vinext-starter
+# Recipe Cost Calculator
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Production Controller application for recipe formulas, ingredient costing,
+production batches, completed-yield calculations, reports, and operational
+settings.
+
+Repository: `ops1-ship-it/Production-Controller`
 
 ## Prerequisites
 
 - Node.js `>=22.13.0`
+- npm
 
-## Quick Start
+## Local Development
 
 ```bash
 npm install
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Useful commands:
 
-## Included Shape
+- `npm run build`: compile the vinext application.
+- `npm test`: build and run server-rendered route checks.
+- `npm run lint`: run ESLint.
+- `npm run db:generate`: generate Drizzle migrations after schema changes.
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## Application Routes
 
-## Workspace Auth Headers
+- `/dashboard`: operational summary.
+- `/ingredients`: Ingredients Bible with search, filters, inline costing, duplicate, and archive actions.
+- `/recipes`: saved recipe library with view, edit, duplicate, production, archive, and delete actions.
+- `/recipes/new`: create a recipe.
+- `/recipes/[recipeId]`: read-only recipe detail.
+- `/recipes/[recipeId]/edit`: edit the base formula, method, yield, and cost rules.
+- `/productions`: production landing page.
+- `/productions/new`: start a production from a saved recipe snapshot.
+- `/productions/in-progress`: manage active batches.
+- `/productions/completed`: read-only completed production history.
+- `/productions/[productionId]`: production detail and completion workflow.
+- `/reports`: yield, cost, and profitability summaries.
+- `/settings`: lookup values and costing policy notes.
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+## Source Control Policy
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+- Use feature branches for all new work.
+- Never commit directly to `main`.
+- Keep commits focused and atomic.
+- Use descriptive commit messages.
+- Compile and test successfully before committing.
+- Keep documentation updated with behavior, workflow, or setup changes.
+- Preserve the project structure under `app/`, `tests/`, `db/`, and `.github/`.
 
-Treat the full name as optional and fall back to email when it is absent:
+Recommended branch naming:
 
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+git switch -c feature/short-description
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+Codex-authored branches use the `codex/` prefix.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## Secrets and Configuration
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+- Do not commit secrets, API keys, access tokens, PEM files, `.npmrc`, or local environment files.
+- Store sensitive configuration in environment variables managed by the deployment platform.
+- Use `.env.example` for non-sensitive sample variable names only.
+- Build artifacts, dependencies, local Wrangler output, caches, and environment files are ignored in `.gitignore`.
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+No runtime environment variables are required for the current app surface.
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+## Continuous Integration
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+GitHub Actions runs on pull requests to `main` and pushes to `main`:
 
-## Useful Commands
+1. Install dependencies with `npm ci`.
+2. Run `npm run lint`.
+3. Run `npm test`, which builds the app and checks the rendered application routes.
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+The workflow lives at `.github/workflows/ci.yml`.
 
-## Learn More
+## Deployment
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+The app is configured for OpenAI Sites through `.openai/hosting.json`.
+Deployment artifacts are generated from the validated build output and should
+only be published from committed source.

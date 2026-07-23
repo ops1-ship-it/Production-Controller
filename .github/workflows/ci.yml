@@ -15,6 +15,9 @@ jobs:
   build:
     name: Lint, build, and test
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://comyiwrafzylcpnfpxuu.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_UxoDi9NemkYpFKMX8xW25g_GHLyGmOI
 
     steps:
       - name: Check out source

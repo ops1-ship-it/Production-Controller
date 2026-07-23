@@ -25,6 +25,31 @@ Useful commands:
 - `npm run lint`: run ESLint.
 - `npm run db:generate`: generate Drizzle migrations after schema changes.
 
+## Supabase Backend
+
+The app uses Supabase for authentication, database storage, recipe data,
+ingredient data, production batches, costing records, yield records, image
+storage and audit history.
+
+Create `.env.local` from `.env.example`:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://comyiwrafzylcpnfpxuu.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_UxoDi9NemkYpFKMX8xW25g_GHLyGmOI
+```
+
+The publishable key is safe for the browser client. Secret keys, service-role
+keys, database passwords and access tokens must remain server-side and must not
+be committed.
+
+Supabase setup files:
+
+- `src/lib/supabase/`: shared browser, server, middleware, storage, realtime and error helpers.
+- `src/lib/supabase/database.types.ts`: generated database types used by Supabase queries.
+- `supabase/migrations/`: SQL migrations for schema, functions, constraints, indexes, RLS and storage policies.
+- `supabase/README.md`: database setup details.
+- `supabase/test-checklist.md`: create/read/update/complete workflow checklist.
+
 ## Application Routes
 
 - `/dashboard`: operational summary.
@@ -65,8 +90,6 @@ Codex-authored branches use the `codex/` prefix.
 - Store sensitive configuration in environment variables managed by the deployment platform.
 - Use `.env.example` for non-sensitive sample variable names only.
 - Build artifacts, dependencies, local Wrangler output, caches, and environment files are ignored in `.gitignore`.
-
-No runtime environment variables are required for the current app surface.
 
 ## Continuous Integration
 

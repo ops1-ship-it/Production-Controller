@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { User } from "@supabase/supabase-js";
+import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
+import { normalizeSupabaseError } from "@/src/lib/supabase/errors";
+import type { Tables, TablesUpdate } from "@/src/lib/supabase/types";
 
 type Unit =
   | "kg"
@@ -16,6 +20,9 @@ type Unit =
 
 type Ingredient = {
   id: string;
+  businessId?: string;
+  categoryId?: string | null;
+  supplierId?: string | null;
   name: string;
   category: string;
   description: string;
@@ -35,6 +42,7 @@ type Ingredient = {
 
 type FormulaLine = {
   id: string;
+  recipeVersionId?: string;
   ingredientId: string;
   quantity: number;
   unit: Unit;
@@ -47,6 +55,7 @@ type FormulaLine = {
 
 type MethodStep = {
   id: string;
+  recipeVersionId?: string;
   title: string;
   instructions: string;
   duration: string;
@@ -67,6 +76,8 @@ type AdditionalCost = {
 
 type Recipe = {
   id: string;
+  businessId?: string;
+  versionId?: string;
   name: string;
   code: string;
   category: string;
@@ -90,6 +101,7 @@ type Recipe = {
 
 type ProductionLine = {
   id: string;
+  productionBatchId?: string;
   ingredientId: string;
   baseQuantity: number;
   unit: Unit;
@@ -104,6 +116,8 @@ type ProductionLine = {
 
 type ProductionBatch = {
   id: string;
+  businessId?: string;
+  locationId?: string | null;
   batchNumber: string;
   recipeId: string;
   recipeName: string;
@@ -145,7 +159,19 @@ type Toast = {
   message: string;
 };
 
-const storageKey = "recipe-cost-calculator:v2-application-data";
+type SupabaseLoadState =
+  | "checking"
+  | "unauthenticated"
+  | "no-business"
+  | "ready"
+  | "failed";
+
+type BusinessContext = {
+  businessId: string;
+  locationId: string | null;
+  userId: string;
+  userEmail: string;
+};
 
 const units: Unit[] = [
   "kg",
@@ -173,379 +199,6 @@ const additionalCostTypes = [
 
 const massUnits: Partial<Record<Unit, number>> = { kg: 1000, g: 1 };
 const volumeUnits: Partial<Record<Unit, number>> = { L: 1000, ml: 1 };
-
-const initialIngredients: Ingredient[] = [
-  {
-    id: "silverside",
-    name: "Silverside",
-    category: "Meat",
-    description: "Trimmed beef cut used as the primary scaling ingredient.",
-    supplier: "Karoo Butchery",
-    sku: "MEAT-SILV-5KG",
-    purchaseQuantity: 1,
-    purchaseUnit: "kg",
-    purchaseCost: 132.5,
-    baseUnit: "g",
-    defaultWastage: 0,
-    notes: "Use chilled and trimmed.",
-    active: true,
-    lastCostUpdate: "23 Jul 2026",
-    createdAt: "18 Jul 2026",
-    updatedAt: "23 Jul 2026",
-  },
-  {
-    id: "coarse-salt",
-    name: "Coarse Salt",
-    category: "Seasoning",
-    description: "Food-grade coarse curing salt.",
-    supplier: "Cape Dry Goods",
-    sku: "DRY-SALT-10KG",
-    purchaseQuantity: 10,
-    purchaseUnit: "kg",
-    purchaseCost: 122.5,
-    baseUnit: "g",
-    defaultWastage: 0,
-    notes: "Store sealed.",
-    active: true,
-    lastCostUpdate: "20 Jul 2026",
-    createdAt: "18 Jul 2026",
-    updatedAt: "20 Jul 2026",
-  },
-  {
-    id: "coriander",
-    name: "Whole Coriander",
-    category: "Spice",
-    description: "Whole seed coriander for toasted spice blends.",
-    supplier: "Spice Route",
-    sku: "SPC-CORI-1KG",
-    purchaseQuantity: 1,
-    purchaseUnit: "kg",
-    purchaseCost: 145,
-    baseUnit: "g",
-    defaultWastage: 2,
-    notes: "Toast before cracking.",
-    active: true,
-    lastCostUpdate: "20 Jul 2026",
-    createdAt: "18 Jul 2026",
-    updatedAt: "20 Jul 2026",
-  },
-  {
-    id: "black-pepper",
-    name: "Coarse Black Pepper",
-    category: "Spice",
-    description: "Coarse milled pepper for curing mixes.",
-    supplier: "Spice Route",
-    sku: "SPC-PEPP-1KG",
-    purchaseQuantity: 1,
-    purchaseUnit: "kg",
-    purchaseCost: 190,
-    baseUnit: "g",
-    defaultWastage: 0,
-    notes: "Use fresh stock.",
-    active: true,
-    lastCostUpdate: "20 Jul 2026",
-    createdAt: "18 Jul 2026",
-    updatedAt: "20 Jul 2026",
-  },
-  {
-    id: "vinegar",
-    name: "Brown Vinegar",
-    category: "Liquid",
-    description: "Brown vinegar used in marinades and curing dips.",
-    supplier: "Pantry Wholesale",
-    sku: "LIQ-VINE-5L",
-    purchaseQuantity: 5,
-    purchaseUnit: "L",
-    purchaseCost: 88,
-    baseUnit: "ml",
-    defaultWastage: 0,
-    notes: "Standard brown vinegar.",
-    active: true,
-    lastCostUpdate: "21 Jul 2026",
-    createdAt: "18 Jul 2026",
-    updatedAt: "21 Jul 2026",
-  },
-  {
-    id: "bicarb",
-    name: "Bicarbonate of Soda",
-    category: "Additive",
-    description: "Fine bicarbonate of soda powder.",
-    supplier: "Cape Dry Goods",
-    sku: "ADD-BIC-500G",
-    purchaseQuantity: 500,
-    purchaseUnit: "g",
-    purchaseCost: 36,
-    baseUnit: "g",
-    defaultWastage: 0,
-    notes: "Use sparingly.",
-    active: true,
-    lastCostUpdate: "19 Jul 2026",
-    createdAt: "18 Jul 2026",
-    updatedAt: "19 Jul 2026",
-  },
-];
-
-const baseFormula: FormulaLine[] = [
-  {
-    id: "line-silverside",
-    ingredientId: "silverside",
-    quantity: 1,
-    unit: "kg",
-    isMain: true,
-    optional: false,
-    wastage: 0,
-    notes: "Scaling ingredient",
-    sortOrder: 1,
-  },
-  {
-    id: "line-salt",
-    ingredientId: "coarse-salt",
-    quantity: 20,
-    unit: "g",
-    isMain: false,
-    optional: false,
-    wastage: 0,
-    notes: "",
-    sortOrder: 2,
-  },
-  {
-    id: "line-coriander",
-    ingredientId: "coriander",
-    quantity: 12,
-    unit: "g",
-    isMain: false,
-    optional: false,
-    wastage: 2,
-    notes: "Cracked",
-    sortOrder: 3,
-  },
-  {
-    id: "line-pepper",
-    ingredientId: "black-pepper",
-    quantity: 4,
-    unit: "g",
-    isMain: false,
-    optional: false,
-    wastage: 0,
-    notes: "",
-    sortOrder: 4,
-  },
-  {
-    id: "line-vinegar",
-    ingredientId: "vinegar",
-    quantity: 150,
-    unit: "ml",
-    isMain: false,
-    optional: false,
-    wastage: 0,
-    notes: "",
-    sortOrder: 5,
-  },
-  {
-    id: "line-bicarb",
-    ingredientId: "bicarb",
-    quantity: 2,
-    unit: "g",
-    isMain: false,
-    optional: false,
-    wastage: 0,
-    notes: "",
-    sortOrder: 6,
-  },
-];
-
-const baseMethod: MethodStep[] = [
-  {
-    id: "step-1",
-    title: "Trim and weigh",
-    instructions:
-      "Trim silverside and record the usable starting weight before seasoning.",
-    duration: "10 min",
-    temperature: "Chilled",
-    equipment: "Scale, boning knife",
-    image: "",
-    notes: "Keep the main ingredient quantity accurate.",
-  },
-  {
-    id: "step-2",
-    title: "Mix cure",
-    instructions:
-      "Combine salt, coriander, pepper and bicarbonate, then coat the meat evenly.",
-    duration: "8 min",
-    temperature: "Ambient",
-    equipment: "Mixing bowl, gloves",
-    image: "",
-    notes: "",
-  },
-  {
-    id: "step-3",
-    title: "Rest and review",
-    instructions:
-      "Add vinegar, cover, rest under refrigeration and review final usable yield.",
-    duration: "24 h",
-    temperature: "2-5 C",
-    equipment: "Food-safe tub, chiller",
-    image: "",
-    notes: "Capture photos for batch record.",
-  },
-];
-
-const initialRecipes: Recipe[] = [
-  {
-    id: "recipe-silverside",
-    name: "Traditional Silverside Biltong",
-    code: "BEEF-SILV-001",
-    category: "Cured Meat",
-    description: "A base biltong-style formula with immediate batch scaling.",
-    version: "1.0",
-    status: "Active",
-    baseStartingQuantity: 1,
-    baseStartingUnit: "kg",
-    expectedYield: 0.9,
-    yieldUnit: "kg",
-    defaultAdditionalCost: 24,
-    defaultSellingUnit: "Per kg",
-    pricingMethod: "Gross Margin",
-    pricingPercentage: 42,
-    methodIntro: "Keep the meat chilled and record all trim and yield changes.",
-    image: "",
-    updatedAt: "23 Jul 2026, 09:42",
-    formulaLines: baseFormula,
-    methodSteps: baseMethod,
-  },
-  {
-    id: "recipe-biltong",
-    name: "Coriander Biltong Slab",
-    code: "BEEF-BILT-002",
-    category: "Dried Meat",
-    description: "Leaner slabs with heavier coriander and a longer dry stage.",
-    version: "1.2",
-    status: "Active",
-    baseStartingQuantity: 1,
-    baseStartingUnit: "kg",
-    expectedYield: 0.62,
-    yieldUnit: "kg",
-    defaultAdditionalCost: 32,
-    defaultSellingUnit: "Per 100 g",
-    pricingMethod: "Gross Margin",
-    pricingPercentage: 48,
-    methodIntro: "Cut even slabs and dry until the target moisture loss is reached.",
-    image: "",
-    updatedAt: "22 Jul 2026, 15:18",
-    formulaLines: [
-      { ...baseFormula[0], id: "biltong-silverside", notes: "Trim lean" },
-      { ...baseFormula[1], id: "biltong-salt", quantity: 24 },
-      {
-        ...baseFormula[2],
-        id: "biltong-coriander",
-        quantity: 18,
-        wastage: 3,
-        notes: "Toasted and cracked",
-      },
-      { ...baseFormula[3], id: "biltong-pepper", quantity: 5 },
-      {
-        ...baseFormula[4],
-        id: "biltong-vinegar",
-        quantity: 120,
-        notes: "Dip before curing",
-      },
-    ],
-    methodSteps: [
-      {
-        id: "biltong-step-1",
-        title: "Cut slabs",
-        instructions: "Trim and cut even slabs before weighing the batch.",
-        duration: "12 min",
-        temperature: "Chilled",
-        equipment: "Scale, knife",
-        image: "",
-        notes: "",
-      },
-      {
-        id: "biltong-step-2",
-        title: "Cure",
-        instructions: "Apply dry cure and rest under refrigeration.",
-        duration: "12 h",
-        temperature: "2-5 C",
-        equipment: "Food-safe tub",
-        image: "",
-        notes: "",
-      },
-      {
-        id: "biltong-step-3",
-        title: "Dry",
-        instructions: "Hang until target moisture loss is reached.",
-        duration: "72 h",
-        temperature: "18-22 C",
-        equipment: "Drying cabinet",
-        image: "",
-        notes: "Record final yield before packing.",
-      },
-    ],
-  },
-  {
-    id: "recipe-jerky",
-    name: "Vinegar Beef Jerky",
-    code: "BEEF-JERK-003",
-    category: "Snack",
-    description: "Thin-cut jerky batch with a higher vinegar marinade ratio.",
-    version: "0.8",
-    status: "Draft",
-    baseStartingQuantity: 1,
-    baseStartingUnit: "kg",
-    expectedYield: 0.52,
-    yieldUnit: "kg",
-    defaultAdditionalCost: 28,
-    defaultSellingUnit: "Per packet",
-    pricingMethod: "Markup",
-    pricingPercentage: 75,
-    methodIntro: "Slice evenly and marinate before drying.",
-    image: "",
-    updatedAt: "21 Jul 2026, 11:05",
-    formulaLines: [
-      { ...baseFormula[0], id: "jerky-silverside", notes: "Slice thin" },
-      {
-        ...baseFormula[4],
-        id: "jerky-vinegar",
-        quantity: 220,
-        sortOrder: 2,
-        notes: "Marinade",
-      },
-      { ...baseFormula[1], id: "jerky-salt", quantity: 18, sortOrder: 3 },
-      { ...baseFormula[3], id: "jerky-pepper", quantity: 8, sortOrder: 4 },
-      {
-        ...baseFormula[2],
-        id: "jerky-coriander",
-        quantity: 6,
-        optional: true,
-        sortOrder: 5,
-        notes: "Optional",
-      },
-    ],
-    methodSteps: [
-      {
-        id: "jerky-step-1",
-        title: "Slice",
-        instructions: "Slice silverside evenly for fast drying.",
-        duration: "18 min",
-        temperature: "Chilled",
-        equipment: "Slicer, scale",
-        image: "",
-        notes: "",
-      },
-      {
-        id: "jerky-step-2",
-        title: "Marinate",
-        instructions: "Mix marinade and rest under refrigeration.",
-        duration: "8 h",
-        temperature: "2-5 C",
-        equipment: "Tub, gloves",
-        image: "",
-        notes: "",
-      },
-    ],
-  },
-];
 
 function makeId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -661,14 +314,6 @@ function todayStamp() {
   }).format(new Date());
 }
 
-function cloneFormula(lines: FormulaLine[]) {
-  return lines.map((line) => ({ ...line }));
-}
-
-function cloneMethod(steps: MethodStep[]) {
-  return steps.map((step) => ({ ...step }));
-}
-
 function productionLinesForRecipe(
   recipe: Recipe,
   mainQuantity: number,
@@ -705,6 +350,271 @@ function productionLinesForRecipe(
       notes: "",
     };
   });
+}
+
+type IngredientSelect = Tables<"ingredients"> & {
+  ingredient_categories?: Pick<Tables<"ingredient_categories">, "name"> | null;
+  suppliers?: Pick<Tables<"suppliers">, "name"> | null;
+};
+
+type ProductionStatusRow = Tables<"production_batches">["status"];
+
+function recipeStatusFromDb(status: string): Recipe["status"] {
+  if (status === "active") return "Active";
+  if (status === "archived") return "Archived";
+  return "Draft";
+}
+
+function recipeStatusToDb(status: Recipe["status"]) {
+  if (status === "Active") return "active";
+  if (status === "Archived") return "archived";
+  return "draft";
+}
+
+function productionStatusFromDb(status: ProductionStatusRow): ProductionBatch["status"] {
+  const statusMap: Record<string, ProductionBatch["status"]> = {
+    draft: "Draft",
+    in_progress: "In Progress",
+    resting: "Resting",
+    drying: "Drying",
+    awaiting_review: "Awaiting Review",
+    on_hold: "On Hold",
+    completed: "Completed",
+    cancelled: "Cancelled",
+  };
+  return statusMap[status] ?? "Draft";
+}
+
+function productionStatusToDb(status: ProductionBatch["status"]) {
+  const statusMap: Record<ProductionBatch["status"], string> = {
+    Draft: "draft",
+    "In Progress": "in_progress",
+    Resting: "resting",
+    Drying: "drying",
+    "Awaiting Review": "awaiting_review",
+    "On Hold": "on_hold",
+    Completed: "completed",
+    Cancelled: "cancelled",
+  };
+  return statusMap[status];
+}
+
+function pricingMethodFromDb(method: string | null): Recipe["pricingMethod"] {
+  return method === "markup" ? "Markup" : "Gross Margin";
+}
+
+function pricingMethodToDb(method: Recipe["pricingMethod"]) {
+  return method === "Markup" ? "markup" : "gross_margin";
+}
+
+function sellingUnitFromDb(quantity: number | null, unit: string | null) {
+  if (quantity === 0.5 && unit === "kg") return "Per 500 g";
+  if (quantity === 0.25 && unit === "kg") return "Per 250 g";
+  if (quantity === 0.1 && unit === "kg") return "Per 100 g";
+  if (unit === "packet") return "Per packet";
+  if (unit === "portion") return "Per portion";
+  if (unit === "item") return "Per item";
+  return "Per kg";
+}
+
+function sellingUnitToDb(unit: string) {
+  if (unit === "Per 500 g") return { quantity: 0.5, uom: "kg" };
+  if (unit === "Per 250 g") return { quantity: 0.25, uom: "kg" };
+  if (unit === "Per 100 g") return { quantity: 0.1, uom: "kg" };
+  if (unit === "Per packet") return { quantity: 1, uom: "packet" };
+  if (unit === "Per portion") return { quantity: 1, uom: "portion" };
+  if (unit === "Per item") return { quantity: 1, uom: "item" };
+  return { quantity: 1, uom: "kg" };
+}
+
+function mapIngredient(row: IngredientSelect): Ingredient {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    categoryId: row.category_id,
+    supplierId: row.supplier_id,
+    name: row.name,
+    category: row.ingredient_categories?.name ?? "Uncategorised",
+    description: row.description ?? "",
+    supplier: row.suppliers?.name ?? "",
+    sku: row.sku ?? "",
+    purchaseQuantity: Number(row.purchase_quantity),
+    purchaseUnit: row.purchase_uom as Unit,
+    purchaseCost: Number(row.purchase_cost),
+    baseUnit: row.recipe_base_uom as Unit,
+    defaultWastage: Number(row.default_wastage_percentage),
+    notes: row.notes ?? "",
+    active: row.is_active,
+    lastCostUpdate: new Date(row.updated_at).toLocaleDateString("en-ZA"),
+    createdAt: new Date(row.created_at).toLocaleDateString("en-ZA"),
+    updatedAt: new Date(row.updated_at).toLocaleDateString("en-ZA"),
+  };
+}
+
+function mapFormulaLine(row: Tables<"recipe_formula_lines">): FormulaLine {
+  return {
+    id: row.id,
+    recipeVersionId: row.recipe_version_id,
+    ingredientId: row.ingredient_id,
+    quantity: Number(row.formula_quantity),
+    unit: row.formula_uom as Unit,
+    isMain: row.is_main_ingredient,
+    optional: row.is_optional,
+    wastage: Number(row.wastage_percentage),
+    notes: row.notes ?? "",
+    sortOrder: row.sort_order,
+  };
+}
+
+function mapMethodStep(row: Tables<"recipe_method_steps">): MethodStep {
+  return {
+    id: row.id,
+    recipeVersionId: row.recipe_version_id,
+    title: row.title ?? "",
+    instructions: row.instructions,
+    duration: row.duration_minutes ? `${row.duration_minutes} min` : "",
+    temperature:
+      row.temperature_value && row.temperature_uom
+        ? `${row.temperature_value} ${row.temperature_uom}`
+        : "",
+    equipment: row.equipment ?? "",
+    image: row.image_path ?? "",
+    notes: row.notes ?? "",
+  };
+}
+
+function mapRecipe(
+  row: Tables<"recipes">,
+  version: Tables<"recipe_versions">,
+  formulaLines: Tables<"recipe_formula_lines">[],
+  methodSteps: Tables<"recipe_method_steps">[],
+): Recipe {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    versionId: version.id,
+    name: row.name,
+    code: row.recipe_code ?? "",
+    category: row.category ?? "",
+    description: row.description ?? "",
+    version: version.version_number.toString(),
+    status: recipeStatusFromDb(row.status),
+    baseStartingQuantity: Number(version.base_main_quantity),
+    baseStartingUnit: version.base_main_uom as Unit,
+    expectedYield: Number(version.expected_yield ?? 0),
+    yieldUnit: (version.expected_yield_uom ?? version.base_main_uom) as Unit,
+    defaultAdditionalCost: Number(version.estimated_additional_cost),
+    defaultSellingUnit: sellingUnitFromDb(
+      version.default_selling_unit_quantity,
+      version.default_selling_unit_uom,
+    ),
+    pricingMethod: pricingMethodFromDb(version.default_pricing_method),
+    pricingPercentage: Number(version.default_pricing_percentage ?? 0),
+    methodIntro: version.method_introduction ?? "",
+    image: "",
+    updatedAt: new Date(row.updated_at).toLocaleString("en-ZA"),
+    formulaLines: formulaLines
+      .filter((line) => line.recipe_version_id === version.id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map(mapFormulaLine),
+    methodSteps: methodSteps
+      .filter((step) => step.recipe_version_id === version.id)
+      .sort((a, b) => a.step_number - b.step_number)
+      .map(mapMethodStep),
+  };
+}
+
+function mapProductionLine(row: Tables<"production_ingredient_lines">): ProductionLine {
+  return {
+    id: row.id,
+    productionBatchId: row.production_batch_id,
+    ingredientId: row.ingredient_id,
+    baseQuantity: Number(row.formula_quantity),
+    unit: row.formula_uom as Unit,
+    requiredQuantity: Number(row.calculated_quantity),
+    actualQuantity: Number(row.actual_quantity ?? row.calculated_quantity),
+    actualUnit: (row.actual_uom ?? row.calculated_uom) as Unit,
+    expectedCost: Number(row.expected_line_cost),
+    actualCost: Number(row.actual_line_cost ?? row.expected_line_cost),
+    costSnapshot: Number(row.ingredient_cost_snapshot),
+    notes: row.notes ?? "",
+  };
+}
+
+function mapProductionMethodStep(row: Tables<"production_method_steps">): MethodStep {
+  return {
+    id: row.id,
+    title: row.title ?? "",
+    instructions: row.instructions,
+    duration: row.duration_minutes ? `${row.duration_minutes} min` : "",
+    temperature:
+      row.temperature_value && row.temperature_uom
+        ? `${row.temperature_value} ${row.temperature_uom}`
+        : "",
+    equipment: row.equipment ?? "",
+    image: "",
+    notes: row.notes ?? "",
+  };
+}
+
+function mapProductionCost(row: Tables<"production_additional_costs">): AdditionalCost {
+  return {
+    id: row.id,
+    type: row.cost_type,
+    description: row.description ?? "",
+    quantity: Number(row.quantity),
+    rate: Number(row.rate),
+    notes: row.notes ?? "",
+  };
+}
+
+function mapProduction(
+  row: Tables<"production_batches">,
+  recipeName: string,
+  recipeVersion: string,
+  lines: Tables<"production_ingredient_lines">[],
+  methodSteps: Tables<"production_method_steps">[],
+  additionalCosts: Tables<"production_additional_costs">[],
+): ProductionBatch {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    locationId: row.location_id,
+    batchNumber: row.batch_number,
+    recipeId: row.recipe_id,
+    recipeName,
+    recipeVersion,
+    status: productionStatusFromDb(row.status),
+    mainQuantity: Number(row.actual_main_quantity),
+    mainUnit: row.actual_main_uom as Unit,
+    startDate: row.start_datetime ?? "",
+    endDate: row.end_datetime ?? "",
+    responsible: row.responsible_user_id ?? "",
+    location: row.location_id ?? "",
+    expectedCompletion: "",
+    notes: "",
+    outcomeNotes: row.outcome_notes ?? "",
+    completedBy: row.completed_by ?? "",
+    qualityRating: row.quality_rating?.toString() ?? "",
+    startingYield: Number(row.starting_yield ?? row.actual_main_quantity),
+    completedYield: Number(row.completed_yield ?? 0),
+    yieldUnit: (row.completed_yield_uom ?? row.actual_main_uom) as Unit,
+    methodSnapshot: methodSteps
+      .filter((step) => step.production_batch_id === row.id)
+      .sort((a, b) => a.step_number - b.step_number)
+      .map(mapProductionMethodStep),
+    formulaSnapshot: [],
+    lines: lines
+      .filter((line) => line.production_batch_id === row.id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map(mapProductionLine),
+    additionalCosts: additionalCosts
+      .filter((cost) => cost.production_batch_id === row.id)
+      .map(mapProductionCost),
+    finalTotalCost: Number(row.total_production_cost),
+    finalCostPerYield: Number(row.cost_per_selling_unit ?? 0),
+    finalSellingPrice: Number(row.final_selling_price ?? row.recommended_selling_price_ex_vat ?? 0),
+  };
 }
 
 function fieldLabel(label: string, required?: boolean) {
@@ -792,49 +702,10 @@ type AppData = {
   productions: ProductionBatch[];
 };
 
-const completedDemoProduction: ProductionBatch = {
-  id: "production-completed-001",
-  batchNumber: "PB-2026-0000",
-  recipeId: "recipe-silverside",
-  recipeName: "Traditional Silverside Biltong",
-  recipeVersion: "1.0",
-  status: "Completed",
-  mainQuantity: 1.5,
-  mainUnit: "kg",
-  startDate: "2026-07-20T08:00",
-  endDate: "2026-07-22T11:00",
-  responsible: "A. Carstens",
-  location: "Cape Town",
-  expectedCompletion: "2026-07-22T08:00",
-  notes: "Completed with normal drying loss.",
-  outcomeNotes: "Good texture and even cure.",
-  completedBy: "A. Carstens",
-  qualityRating: "4",
-  startingYield: 1.5,
-  completedYield: 0.9,
-  yieldUnit: "kg",
-  methodSnapshot: cloneMethod(baseMethod),
-  formulaSnapshot: cloneFormula(baseFormula),
-  lines: [],
-  additionalCosts: [
-    {
-      id: "completed-cost-labour",
-      type: "Labour",
-      description: "Preparation and packing",
-      quantity: 1.5,
-      rate: 85,
-      notes: "",
-    },
-  ],
-  finalTotalCost: 250,
-  finalCostPerYield: 277.78,
-  finalSellingPrice: 478.93,
-};
-
-const initialData: AppData = {
-  ingredients: initialIngredients,
-  recipes: initialRecipes,
-  productions: [completedDemoProduction],
+const emptyAppData: AppData = {
+  ingredients: [],
+  recipes: [],
+  productions: [],
 };
 
 export default function RecipeCostApp({
@@ -843,25 +714,34 @@ export default function RecipeCostApp({
   initialPath?: string;
 }) {
   const [route, setRoute] = useState(initialPath);
-  const [ingredients, setIngredients] = useState(initialData.ingredients);
-  const [recipes, setRecipes] = useState(initialData.recipes);
-  const [productions, setProductions] = useState(initialData.productions);
-  const [activeRecipeId, setActiveRecipeId] = useState("recipe-silverside");
+  const [ingredients, setIngredients] = useState(emptyAppData.ingredients);
+  const [recipes, setRecipes] = useState(emptyAppData.recipes);
+  const [productions, setProductions] = useState(emptyAppData.productions);
+  const [activeRecipeId, setActiveRecipeId] = useState("");
   const [ingredientSearch, setIngredientSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [supplierFilter, setSupplierFilter] = useState("All");
   const [activeFilter, setActiveFilter] = useState("All");
   const [toast, setToast] = useState<Toast | null>(null);
-  const [hasLoadedStoredData, setHasLoadedStoredData] = useState(false);
+  const [supabaseState, setSupabaseState] =
+    useState<SupabaseLoadState>("checking");
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [businessContext, setBusinessContext] = useState<BusinessContext | null>(
+    null,
+  );
+  const [authEmail, setAuthEmail] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [mutationLabel, setMutationLabel] = useState("");
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [startingProduction, setStartingProduction] = useState(false);
   const [productionDraft, setProductionDraft] = useState({
-    recipeId: "recipe-silverside",
-    mainQuantity: 1.5,
+    recipeId: "",
+    mainQuantity: 1,
     mainUnit: "kg" as Unit,
-    startDate: "2026-07-23T08:00",
-    responsible: "A. Carstens",
-    location: "Cape Town",
+    startDate: "",
+    responsible: "",
+    location: "",
     notes: "",
   });
 
@@ -872,42 +752,6 @@ export default function RecipeCostApp({
     window.addEventListener("popstate", readRoute);
     return () => window.removeEventListener("popstate", readRoute);
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const timeout = window.setTimeout(() => {
-      try {
-        const stored = window.localStorage.getItem(storageKey);
-        if (!stored) return;
-        const parsed = JSON.parse(stored) as Partial<AppData>;
-        if (cancelled) return;
-        if (parsed.ingredients?.length) setIngredients(parsed.ingredients);
-        if (parsed.recipes?.length) setRecipes(parsed.recipes);
-        if (parsed.productions?.length) setProductions(parsed.productions);
-      } catch {
-        if (!cancelled) {
-          setToast({
-            kind: "warning",
-            message: "Saved local application data could not be loaded.",
-          });
-        }
-      } finally {
-        if (!cancelled) setHasLoadedStoredData(true);
-      }
-    }, 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!hasLoadedStoredData) return;
-    window.localStorage.setItem(
-      storageKey,
-      JSON.stringify({ ingredients, recipes, productions }),
-    );
-  }, [hasLoadedStoredData, ingredients, productions, recipes]);
 
   useEffect(() => {
     if (!toast) return;
@@ -928,7 +772,7 @@ export default function RecipeCostApp({
     [ingredients],
   );
   const activeRecipe =
-    recipes.find((recipe) => recipe.id === activeRecipeId) ?? recipes[0];
+    recipes.find((recipe) => recipe.id === activeRecipeId) ?? recipes[0] ?? null;
   const selectedProductionRecipe =
     recipes.find((recipe) => recipe.id === productionDraft.recipeId) ??
     activeRecipe;
@@ -971,12 +815,14 @@ export default function RecipeCostApp({
 
   const productionDraftLines = useMemo(
     () =>
-      productionLinesForRecipe(
-        selectedProductionRecipe,
-        productionDraft.mainQuantity,
-        productionDraft.mainUnit,
-        ingredientMap,
-      ),
+      selectedProductionRecipe
+        ? productionLinesForRecipe(
+            selectedProductionRecipe,
+            productionDraft.mainQuantity,
+            productionDraft.mainUnit,
+            ingredientMap,
+          )
+        : [],
     [
       ingredientMap,
       productionDraft.mainQuantity,
@@ -999,64 +845,415 @@ export default function RecipeCostApp({
     setRoute(`${window.location.pathname}${window.location.search}`);
   };
 
-  const showToast = (kind: Toast["kind"], message: string) => {
+  const showToast = useCallback((kind: Toast["kind"], message: string) => {
     setToast({ kind, message });
+  }, []);
+
+  const resetAppData = useCallback(() => {
+    setIngredients(emptyAppData.ingredients);
+    setRecipes(emptyAppData.recipes);
+    setProductions(emptyAppData.productions);
+    setActiveRecipeId("");
+    setProductionDraft((current) => ({ ...current, recipeId: "" }));
+  }, []);
+
+  const loadSupabaseData = useCallback(async () => {
+    setIsDataLoading(true);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError) throw userError;
+
+      setCurrentUser(user);
+      if (!user) {
+        resetAppData();
+        setBusinessContext(null);
+        setSupabaseState("unauthenticated");
+        return;
+      }
+
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("default_business_id, default_location_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const membershipQuery = supabase
+        .from("business_users")
+        .select("business_id, role")
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .limit(1);
+
+      const { data: membershipData, error: membershipError } =
+        profileData?.default_business_id
+          ? await membershipQuery
+              .eq("business_id", profileData.default_business_id)
+              .maybeSingle()
+          : await membershipQuery.maybeSingle();
+
+      if (membershipError) throw membershipError;
+
+      const membership = membershipData as Pick<
+        Tables<"business_users">,
+        "business_id" | "role"
+      > | null;
+
+      if (!membership) {
+        resetAppData();
+        setBusinessContext(null);
+        setSupabaseState("no-business");
+        return;
+      }
+
+      const { data: locationMembership } = await supabase
+        .from("location_users")
+        .select("location_id")
+        .eq("user_id", user.id)
+        .limit(1)
+        .maybeSingle();
+
+      const businessId = membership.business_id;
+      const locationId =
+        profileData?.default_location_id ??
+        locationMembership?.location_id ??
+        null;
+
+      const [
+        ingredientsResult,
+        recipesResult,
+        versionsResult,
+        productionResult,
+      ] = await Promise.all([
+        supabase
+          .from("ingredients")
+          .select("*, ingredient_categories(name), suppliers(name)")
+          .eq("business_id", businessId)
+          .order("name", { ascending: true }),
+        supabase
+          .from("recipes")
+          .select("*")
+          .eq("business_id", businessId)
+          .order("updated_at", { ascending: false }),
+        supabase
+          .from("recipe_versions")
+          .select("*")
+          .eq("is_current", true)
+          .order("version_number", { ascending: false }),
+        supabase
+          .from("production_batches")
+          .select("*")
+          .eq("business_id", businessId)
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ]);
+
+      if (ingredientsResult.error) throw ingredientsResult.error;
+      if (recipesResult.error) throw recipesResult.error;
+      if (versionsResult.error) throw versionsResult.error;
+      if (productionResult.error) throw productionResult.error;
+
+      const ingredientRows = (ingredientsResult.data ?? []) as IngredientSelect[];
+      const recipeRowsFromDb = recipesResult.data ?? [];
+      const currentVersions = (versionsResult.data ?? []).filter((version) =>
+        recipeRowsFromDb.some((recipe) => recipe.id === version.recipe_id),
+      );
+      const versionIds = currentVersions.map((version) => version.id);
+      const productionRows = productionResult.data ?? [];
+      const productionIds = productionRows.map((production) => production.id);
+
+      const [formulaResult, methodResult, productionLineResult, productionMethodResult, costResult] =
+        await Promise.all([
+          versionIds.length
+            ? supabase
+                .from("recipe_formula_lines")
+                .select("*")
+                .in("recipe_version_id", versionIds)
+                .order("sort_order", { ascending: true })
+            : Promise.resolve({ data: [], error: null }),
+          versionIds.length
+            ? supabase
+                .from("recipe_method_steps")
+                .select("*")
+                .in("recipe_version_id", versionIds)
+                .order("step_number", { ascending: true })
+            : Promise.resolve({ data: [], error: null }),
+          productionIds.length
+            ? supabase
+                .from("production_ingredient_lines")
+                .select("*")
+                .in("production_batch_id", productionIds)
+                .order("sort_order", { ascending: true })
+            : Promise.resolve({ data: [], error: null }),
+          productionIds.length
+            ? supabase
+                .from("production_method_steps")
+                .select("*")
+                .in("production_batch_id", productionIds)
+                .order("step_number", { ascending: true })
+            : Promise.resolve({ data: [], error: null }),
+          productionIds.length
+            ? supabase
+                .from("production_additional_costs")
+                .select("*")
+                .in("production_batch_id", productionIds)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+
+      if (formulaResult.error) throw formulaResult.error;
+      if (methodResult.error) throw methodResult.error;
+      if (productionLineResult.error) throw productionLineResult.error;
+      if (productionMethodResult.error) throw productionMethodResult.error;
+      if (costResult.error) throw costResult.error;
+
+      const formulas = formulaResult.data as Tables<"recipe_formula_lines">[];
+      const methods = methodResult.data as Tables<"recipe_method_steps">[];
+      const productionLines =
+        productionLineResult.data as Tables<"production_ingredient_lines">[];
+      const productionMethods =
+        productionMethodResult.data as Tables<"production_method_steps">[];
+      const productionCosts =
+        costResult.data as Tables<"production_additional_costs">[];
+
+      const versionByRecipeId = new Map(
+        currentVersions.map((version) => [version.recipe_id, version]),
+      );
+      const versionById = new Map(currentVersions.map((version) => [version.id, version]));
+      const recipeById = new Map(recipeRowsFromDb.map((recipe) => [recipe.id, recipe]));
+
+      const mappedRecipes = recipeRowsFromDb
+        .map((recipe) => {
+          const version = versionByRecipeId.get(recipe.id);
+          return version ? mapRecipe(recipe, version, formulas, methods) : null;
+        })
+        .filter((recipe): recipe is Recipe => Boolean(recipe));
+
+      const mappedProductions = productionRows.map((production) => {
+        const recipe = recipeById.get(production.recipe_id);
+        const version = versionById.get(production.recipe_version_id);
+        return mapProduction(
+          production,
+          recipe?.name ?? "Archived recipe",
+          version?.version_number.toString() ?? "snapshot",
+          productionLines,
+          productionMethods,
+          productionCosts,
+        );
+      });
+
+      setIngredients(ingredientRows.map(mapIngredient));
+      setRecipes(mappedRecipes);
+      setProductions(mappedProductions);
+      setBusinessContext({
+        businessId,
+        locationId,
+        userId: user.id,
+        userEmail: user.email ?? "",
+      });
+      setActiveRecipeId((current) =>
+        mappedRecipes.some((recipe) => recipe.id === current)
+          ? current
+          : (mappedRecipes[0]?.id ?? ""),
+      );
+      setProductionDraft((current) => ({
+        ...current,
+        recipeId: mappedRecipes.some((recipe) => recipe.id === current.recipeId)
+          ? current.recipeId
+          : (mappedRecipes[0]?.id ?? ""),
+        responsible: current.responsible || user.email || "",
+        location: current.location || locationId || "",
+        startDate: current.startDate || new Date().toISOString().slice(0, 16),
+      }));
+      setSupabaseState("ready");
+    } catch (error) {
+      resetAppData();
+      setSupabaseState("failed");
+      showToast("failed", normalizeSupabaseError(error));
+    } finally {
+      setIsDataLoading(false);
+    }
+  }, [resetAppData, showToast]);
+
+  useEffect(() => {
+    let unsubscribe = () => {};
+    const timeout = window.setTimeout(() => {
+      void loadSupabaseData();
+      try {
+        const supabase = createSupabaseBrowserClient();
+        const { data } = supabase.auth.onAuthStateChange(() => {
+          void loadSupabaseData();
+        });
+        unsubscribe = () => data.subscription.unsubscribe();
+      } catch {
+        setSupabaseState("failed");
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeout);
+      unsubscribe();
+    };
+  }, [loadSupabaseData]);
+
+  const runSupabaseMutation = async (
+    label: string,
+    successMessage: string,
+    action: () => Promise<void>,
+  ) => {
+    setMutationLabel(label);
+    try {
+      await action();
+      await loadSupabaseData();
+      showToast("success", successMessage);
+    } catch (error) {
+      showToast("failed", normalizeSupabaseError(error));
+    } finally {
+      setMutationLabel("");
+    }
+  };
+
+  const sendMagicLink = async () => {
+    if (!authEmail.trim()) {
+      showToast("failed", "Enter an email address to sign in.");
+      return;
+    }
+    setAuthSubmitting(true);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.auth.signInWithOtp({
+        email: authEmail.trim(),
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+      showToast("success", "Check your email for the sign-in link.");
+    } catch (error) {
+      showToast("failed", normalizeSupabaseError(error));
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const signOut = async () => {
+    await runSupabaseMutation("Signing out", "Signed out.", async () => {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      resetAppData();
+      setBusinessContext(null);
+      setCurrentUser(null);
+      setSupabaseState("unauthenticated");
+    });
+  };
+
+  const requireBusinessContext = () => {
+    if (!businessContext) {
+      throw new Error("Sign in and select a business before saving changes.");
+    }
+    return businessContext;
   };
 
   const updateIngredient = (id: string, patch: Partial<Ingredient>) => {
+    const currentIngredient = ingredients.find((ingredient) => ingredient.id === id);
+    if (!currentIngredient) return;
+    const nextIngredient = { ...currentIngredient, ...patch };
     setIngredients((current) =>
       current.map((ingredient) =>
         ingredient.id === id
-          ? { ...ingredient, ...patch, updatedAt: "23 Jul 2026" }
+          ? { ...nextIngredient, updatedAt: todayStamp() }
           : ingredient,
       ),
     );
+
+    void runSupabaseMutation("Saving ingredient", "Ingredient saved.", async () => {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase
+        .from("ingredients")
+        .update({
+          name: nextIngredient.name,
+          description: nextIngredient.description,
+          sku: nextIngredient.sku || null,
+          purchase_quantity: nextIngredient.purchaseQuantity,
+          purchase_uom: nextIngredient.purchaseUnit,
+          purchase_cost: nextIngredient.purchaseCost,
+          recipe_base_uom: nextIngredient.baseUnit,
+          cost_per_base_unit: ingredientUnitCost(nextIngredient),
+          default_wastage_percentage: nextIngredient.defaultWastage,
+          notes: nextIngredient.notes,
+          is_active: nextIngredient.active,
+        })
+        .eq("id", id)
+        .eq("business_id", context.businessId);
+      if (error) throw error;
+    });
   };
 
   const createIngredient = () => {
-    const ingredient: Ingredient = {
-      id: makeId("ingredient"),
-      name: "New Ingredient",
-      category: "Uncategorised",
-      description: "",
-      supplier: "",
-      sku: "",
-      purchaseQuantity: 1,
-      purchaseUnit: "kg",
-      purchaseCost: 0,
-      baseUnit: "kg",
-      defaultWastage: 0,
-      notes: "",
-      active: true,
-      lastCostUpdate: "23 Jul 2026",
-      createdAt: "23 Jul 2026",
-      updatedAt: "23 Jul 2026",
-    };
-    setIngredients((current) => [ingredient, ...current]);
-    showToast("success", "Ingredient created.");
+    void runSupabaseMutation("Creating ingredient", "Ingredient created.", async () => {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.from("ingredients").insert({
+        business_id: context.businessId,
+        name: "New Ingredient",
+        purchase_quantity: 1,
+        purchase_uom: "kg",
+        purchase_cost: 0,
+        recipe_base_uom: "kg",
+        cost_per_base_unit: 0,
+        default_wastage_percentage: 0,
+        created_by: context.userId,
+      });
+      if (error) throw error;
+    });
   };
 
   const duplicateIngredient = (ingredient: Ingredient) => {
-    setIngredients((current) => [
-      {
-        ...ingredient,
-        id: makeId("ingredient"),
+    void runSupabaseMutation("Duplicating ingredient", "Ingredient duplicated.", async () => {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.from("ingredients").insert({
+        business_id: context.businessId,
+        category_id: ingredient.categoryId ?? null,
+        supplier_id: ingredient.supplierId ?? null,
         name: `${ingredient.name} copy`,
-        sku: `${ingredient.sku}-COPY`,
-        createdAt: "23 Jul 2026",
-        updatedAt: "23 Jul 2026",
-      },
-      ...current,
-    ]);
-    showToast("success", "Ingredient duplicated.");
+        description: ingredient.description,
+        sku: ingredient.sku ? `${ingredient.sku}-COPY` : null,
+        purchase_quantity: ingredient.purchaseQuantity,
+        purchase_uom: ingredient.purchaseUnit,
+        purchase_cost: ingredient.purchaseCost,
+        recipe_base_uom: ingredient.baseUnit,
+        cost_per_base_unit: ingredientUnitCost(ingredient),
+        default_wastage_percentage: ingredient.defaultWastage,
+        notes: ingredient.notes,
+        created_by: context.userId,
+      });
+      if (error) throw error;
+    });
   };
 
   const archiveIngredient = (id: string) => {
-    updateIngredient(id, { active: false });
-    showToast("warning", "Ingredient archived.");
+    void runSupabaseMutation("Archiving ingredient", "Ingredient archived.", async () => {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase
+        .from("ingredients")
+        .update({ is_active: false })
+        .eq("id", id)
+        .eq("business_id", context.businessId);
+      if (error) throw error;
+    });
   };
 
   const updateRecipe = (recipeId: string, patch: Partial<Recipe>) => {
+    const currentRecipe = recipes.find((recipe) => recipe.id === recipeId);
+    if (!currentRecipe) return;
+    const nextRecipe = { ...currentRecipe, ...patch };
     setRecipes((current) =>
       current.map((recipe) =>
         recipe.id === recipeId
@@ -1064,6 +1261,49 @@ export default function RecipeCostApp({
           : recipe,
       ),
     );
+
+    void runSupabaseMutation("Saving recipe", "Recipe saved.", async () => {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const recipePatch: TablesUpdate<"recipes"> = {};
+      const versionPatch: TablesUpdate<"recipe_versions"> = {};
+
+      if ("name" in patch) recipePatch.name = nextRecipe.name;
+      if ("code" in patch) recipePatch.recipe_code = nextRecipe.code || null;
+      if ("category" in patch) recipePatch.category = nextRecipe.category || null;
+      if ("description" in patch) recipePatch.description = nextRecipe.description || null;
+      if ("status" in patch) recipePatch.status = recipeStatusToDb(nextRecipe.status);
+      if ("baseStartingQuantity" in patch) versionPatch.base_main_quantity = nextRecipe.baseStartingQuantity;
+      if ("baseStartingUnit" in patch) versionPatch.base_main_uom = nextRecipe.baseStartingUnit;
+      if ("expectedYield" in patch) versionPatch.expected_yield = nextRecipe.expectedYield;
+      if ("yieldUnit" in patch) versionPatch.expected_yield_uom = nextRecipe.yieldUnit;
+      if ("defaultAdditionalCost" in patch) versionPatch.estimated_additional_cost = nextRecipe.defaultAdditionalCost;
+      if ("pricingMethod" in patch) versionPatch.default_pricing_method = pricingMethodToDb(nextRecipe.pricingMethod);
+      if ("pricingPercentage" in patch) versionPatch.default_pricing_percentage = nextRecipe.pricingPercentage;
+      if ("methodIntro" in patch) versionPatch.method_introduction = nextRecipe.methodIntro;
+      if ("defaultSellingUnit" in patch) {
+        const sellingUnit = sellingUnitToDb(nextRecipe.defaultSellingUnit);
+        versionPatch.default_selling_unit_quantity = sellingUnit.quantity;
+        versionPatch.default_selling_unit_uom = sellingUnit.uom;
+      }
+
+      if (Object.keys(recipePatch).length) {
+        const { error } = await supabase
+          .from("recipes")
+          .update(recipePatch)
+          .eq("id", recipeId)
+          .eq("business_id", context.businessId);
+        if (error) throw error;
+      }
+
+      if (Object.keys(versionPatch).length && currentRecipe.versionId) {
+        const { error } = await supabase
+          .from("recipe_versions")
+          .update(versionPatch)
+          .eq("id", currentRecipe.versionId);
+        if (error) throw error;
+      }
+    });
   };
 
   const updateFormulaLine = (
@@ -1071,6 +1311,10 @@ export default function RecipeCostApp({
     lineId: string,
     patch: Partial<FormulaLine>,
   ) => {
+    const currentRecipe = recipes.find((recipe) => recipe.id === recipeId);
+    const currentLine = currentRecipe?.formulaLines.find((line) => line.id === lineId);
+    if (!currentRecipe || !currentLine) return;
+    const nextLine = { ...currentLine, ...patch };
     setRecipes((current) =>
       current.map((recipe) =>
         recipe.id === recipeId
@@ -1084,9 +1328,33 @@ export default function RecipeCostApp({
           : recipe,
       ),
     );
+
+    void runSupabaseMutation("Saving formula line", "Formula line saved.", async () => {
+      const ingredient = ingredientMap.get(nextLine.ingredientId);
+      if (!ingredient) throw new Error("Select a valid ingredient.");
+      const converted = convertQuantity(nextLine.quantity, nextLine.unit, ingredient.baseUnit);
+      const { error } = await createSupabaseBrowserClient()
+        .from("recipe_formula_lines")
+        .update({
+          ingredient_id: nextLine.ingredientId,
+          formula_quantity: nextLine.quantity,
+          formula_uom: nextLine.unit,
+          converted_base_quantity: converted,
+          ingredient_cost_snapshot: ingredientUnitCost(ingredient),
+          line_cost: formulaLineCost(nextLine, ingredientMap),
+          is_optional: nextLine.optional,
+          wastage_percentage: nextLine.wastage,
+          notes: nextLine.notes,
+        })
+        .eq("id", lineId);
+      if (error) throw error;
+    });
   };
 
   const setMainFormulaLine = (recipeId: string, lineId: string) => {
+    const recipe = recipes.find((item) => item.id === recipeId);
+    const targetLine = recipe?.formulaLines.find((line) => line.id === lineId);
+    if (!recipe || !targetLine?.recipeVersionId) return;
     setRecipes((current) =>
       current.map((recipe) =>
         recipe.id === recipeId
@@ -1100,54 +1368,76 @@ export default function RecipeCostApp({
           : recipe,
       ),
     );
+
+    void runSupabaseMutation("Saving main ingredient", "Main ingredient saved.", async () => {
+      const supabase = createSupabaseBrowserClient();
+      const { error: resetError } = await supabase
+        .from("recipe_formula_lines")
+        .update({ is_main_ingredient: false })
+        .eq("recipe_version_id", targetLine.recipeVersionId);
+      if (resetError) throw resetError;
+      const { error } = await supabase
+        .from("recipe_formula_lines")
+        .update({ is_main_ingredient: true })
+        .eq("id", lineId);
+      if (error) throw error;
+    });
   };
 
   const addFormulaLine = (recipeId: string) => {
-    setRecipes((current) =>
-      current.map((recipe) =>
-        recipe.id === recipeId
-          ? {
-              ...recipe,
-              formulaLines: [
-                ...recipe.formulaLines,
-                {
-                  id: makeId("formula"),
-                  ingredientId:
-                    ingredients.find((ingredient) => ingredient.active)?.id ?? "",
-                  quantity: 1,
-                  unit: "g",
-                  isMain: recipe.formulaLines.length === 0,
-                  optional: false,
-                  wastage: 0,
-                  notes: "",
-                  sortOrder: recipe.formulaLines.length + 1,
-                },
-              ],
-            }
-          : recipe,
-      ),
-    );
+    const recipe = recipes.find((item) => item.id === recipeId);
+    const ingredient = ingredients.find((item) => item.active);
+    if (!recipe?.versionId || !ingredient) {
+      showToast("failed", "Create an active ingredient before adding formula lines.");
+      return;
+    }
+
+    void runSupabaseMutation("Adding formula line", "Formula line added.", async () => {
+      const quantity = 1;
+      const unit: Unit = ingredient.baseUnit;
+      const line: FormulaLine = {
+        id: "",
+        recipeVersionId: recipe.versionId,
+        ingredientId: ingredient.id,
+        quantity,
+        unit,
+        isMain: recipe.formulaLines.length === 0,
+        optional: false,
+        wastage: 0,
+        notes: "",
+        sortOrder: recipe.formulaLines.length + 1,
+      };
+      const { error } = await createSupabaseBrowserClient()
+        .from("recipe_formula_lines")
+        .insert({
+          recipe_version_id: recipe.versionId,
+          ingredient_id: ingredient.id,
+          formula_quantity: quantity,
+          formula_uom: unit,
+          converted_base_quantity: convertQuantity(quantity, unit, ingredient.baseUnit),
+          ingredient_cost_snapshot: ingredientUnitCost(ingredient),
+          line_cost: formulaLineCost(line, ingredientMap),
+          is_main_ingredient: line.isMain,
+          is_optional: false,
+          wastage_percentage: 0,
+          sort_order: line.sortOrder,
+        });
+      if (error) throw error;
+    });
   };
 
   const removeFormulaLine = (recipeId: string, lineId: string) => {
-    setRecipes((current) =>
-      current.map((recipe) => {
-        if (recipe.id !== recipeId) return recipe;
-        const nextLines = recipe.formulaLines.filter((line) => line.id !== lineId);
-        const hasMain = nextLines.some((line) => line.isMain);
-        return {
-          ...recipe,
-          formulaLines: nextLines.map((line, index) => ({
-            ...line,
-            isMain: hasMain ? line.isMain : index === 0,
-            sortOrder: index + 1,
-          })),
-        };
-      }),
-    );
+    void runSupabaseMutation("Deleting formula line", "Formula line deleted.", async () => {
+      const { error } = await createSupabaseBrowserClient()
+        .from("recipe_formula_lines")
+        .delete()
+        .eq("id", lineId);
+      if (error) throw error;
+    });
   };
 
   const moveMethodStep = (recipeId: string, stepId: string, direction: -1 | 1) => {
+    let reorderedSteps: MethodStep[] = [];
     setRecipes((current) =>
       current.map((recipe) => {
         if (recipe.id !== recipeId) return recipe;
@@ -1159,9 +1449,23 @@ export default function RecipeCostApp({
         const nextSteps = [...recipe.methodSteps];
         const [step] = nextSteps.splice(index, 1);
         nextSteps.splice(nextIndex, 0, step);
+        reorderedSteps = nextSteps;
         return { ...recipe, methodSteps: nextSteps };
       }),
     );
+
+    if (reorderedSteps.length) {
+      void runSupabaseMutation("Reordering method", "Method order saved.", async () => {
+        const supabase = createSupabaseBrowserClient();
+        for (const [index, step] of reorderedSteps.entries()) {
+          const { error } = await supabase
+            .from("recipe_method_steps")
+            .update({ step_number: index + 1 })
+            .eq("id", step.id);
+          if (error) throw error;
+        }
+      });
+    }
   };
 
   const updateMethodStep = (
@@ -1169,6 +1473,10 @@ export default function RecipeCostApp({
     stepId: string,
     patch: Partial<MethodStep>,
   ) => {
+    const currentRecipe = recipes.find((recipe) => recipe.id === recipeId);
+    const currentStep = currentRecipe?.methodSteps.find((step) => step.id === stepId);
+    if (!currentRecipe || !currentStep) return;
+    const nextStep = { ...currentStep, ...patch };
     setRecipes((current) =>
       current.map((recipe) =>
         recipe.id === recipeId
@@ -1182,191 +1490,259 @@ export default function RecipeCostApp({
           : recipe,
       ),
     );
+
+    void runSupabaseMutation("Saving method step", "Method step saved.", async () => {
+      const { error } = await createSupabaseBrowserClient()
+        .from("recipe_method_steps")
+        .update({
+          title: nextStep.title,
+          instructions: nextStep.instructions || " ",
+          equipment: nextStep.equipment || null,
+          notes: nextStep.notes || null,
+        })
+        .eq("id", stepId);
+      if (error) throw error;
+    });
   };
 
   const addMethodStep = (recipeId: string) => {
-    setRecipes((current) =>
-      current.map((recipe) =>
-        recipe.id === recipeId
-          ? {
-              ...recipe,
-              updatedAt: todayStamp(),
-              methodSteps: [
-                ...recipe.methodSteps,
-                {
-                  id: makeId("step"),
-                  title: "New method step",
-                  instructions: "",
-                  duration: "",
-                  temperature: "",
-                  equipment: "",
-                  image: "",
-                  notes: "",
-                },
-              ],
-            }
-          : recipe,
-      ),
-    );
+    const recipe = recipes.find((item) => item.id === recipeId);
+    if (!recipe?.versionId) return;
+    void runSupabaseMutation("Adding method step", "Method step added.", async () => {
+      const { error } = await createSupabaseBrowserClient()
+        .from("recipe_method_steps")
+        .insert({
+          recipe_version_id: recipe.versionId,
+          step_number: recipe.methodSteps.length + 1,
+          title: "New method step",
+          instructions: "Add instructions",
+        });
+      if (error) throw error;
+    });
   };
 
   const removeMethodStep = (recipeId: string, stepId: string) => {
-    setRecipes((current) =>
-      current.map((recipe) =>
-        recipe.id === recipeId
-          ? {
-              ...recipe,
-              updatedAt: todayStamp(),
-              methodSteps: recipe.methodSteps.filter((step) => step.id !== stepId),
-            }
-          : recipe,
-      ),
-    );
+    void runSupabaseMutation("Deleting method step", "Method step deleted.", async () => {
+      const { error } = await createSupabaseBrowserClient()
+        .from("recipe_method_steps")
+        .delete()
+        .eq("id", stepId);
+      if (error) throw error;
+    });
   };
 
   const createRecipe = () => {
-    const firstIngredient =
-      ingredients.find((ingredient) => ingredient.active)?.id ?? "silverside";
-    const recipe: Recipe = {
-      id: makeId("recipe"),
-      name: "Untitled Recipe",
-      code: `REC-${Date.now().toString(36).slice(-5).toUpperCase()}`,
-      category: "New",
-      description: "",
-      version: "0.1",
-      status: "Draft",
-      baseStartingQuantity: 1,
-      baseStartingUnit: "kg",
-      expectedYield: 1,
-      yieldUnit: "kg",
-      defaultAdditionalCost: 0,
-      defaultSellingUnit: "Per kg",
-      pricingMethod: "Gross Margin",
-      pricingPercentage: 40,
-      methodIntro: "",
-      image: "",
-      updatedAt: todayStamp(),
-      formulaLines: [
-        {
-          id: makeId("formula"),
-          ingredientId: firstIngredient,
-          quantity: 1,
-          unit: "kg",
-          isMain: true,
-          optional: false,
-          wastage: 0,
-          notes: "Scaling ingredient",
-          sortOrder: 1,
-        },
-      ],
-      methodSteps: [],
-    };
-    setRecipes((current) => [recipe, ...current]);
-    setActiveRecipeId(recipe.id);
-    navigate(`/recipes/${recipe.id}/edit`);
+    const firstIngredient = ingredients.find((ingredient) => ingredient.active);
+    if (!firstIngredient) {
+      showToast("failed", "Create an ingredient before creating a recipe.");
+      navigate("/ingredients");
+      return;
+    }
+
+    void runSupabaseMutation("Creating recipe", "Recipe created.", async () => {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const recipeCode = `REC-${Date.now().toString(36).slice(-5).toUpperCase()}`;
+      const { data: recipe, error: recipeError } = await supabase
+        .from("recipes")
+        .insert({
+          business_id: context.businessId,
+          name: "Untitled Recipe",
+          recipe_code: recipeCode,
+          category: "New",
+          status: "draft",
+          created_by: context.userId,
+        })
+        .select("*")
+        .single();
+      if (recipeError) throw recipeError;
+
+      const { data: version, error: versionError } = await supabase
+        .from("recipe_versions")
+        .insert({
+          recipe_id: recipe.id,
+          version_number: 1,
+          main_ingredient_id: firstIngredient.id,
+          base_main_quantity: 1,
+          base_main_uom: firstIngredient.baseUnit,
+          expected_yield: 1,
+          expected_yield_uom: firstIngredient.baseUnit,
+          default_selling_unit_quantity: 1,
+          default_selling_unit_uom: firstIngredient.baseUnit,
+          default_pricing_method: "gross_margin",
+          default_pricing_percentage: 40,
+          created_by: context.userId,
+        })
+        .select("*")
+        .single();
+      if (versionError) throw versionError;
+
+      const { error: lineError } = await supabase.from("recipe_formula_lines").insert({
+        recipe_version_id: version.id,
+        ingredient_id: firstIngredient.id,
+        formula_quantity: 1,
+        formula_uom: firstIngredient.baseUnit,
+        converted_base_quantity: 1,
+        ingredient_cost_snapshot: ingredientUnitCost(firstIngredient),
+        line_cost: ingredientUnitCost(firstIngredient),
+        is_main_ingredient: true,
+        sort_order: 1,
+      });
+      if (lineError) throw lineError;
+      setActiveRecipeId(recipe.id);
+      navigate(`/recipes/${recipe.id}/edit`);
+    });
   };
 
   const duplicateRecipe = (recipe: Recipe) => {
-    const duplicate = {
-      ...recipe,
-      id: makeId("recipe"),
-      name: `${recipe.name} copy`,
-      code: `${recipe.code}-COPY`,
-      status: "Draft" as const,
-      updatedAt: todayStamp(),
-      formulaLines: cloneFormula(recipe.formulaLines).map((line) => ({
-        ...line,
-        id: makeId("formula"),
-      })),
-      methodSteps: cloneMethod(recipe.methodSteps).map((step) => ({
-        ...step,
-        id: makeId("step"),
-      })),
-    };
-    setRecipes((current) => [duplicate, ...current]);
-    showToast("success", "Recipe duplicated.");
+    void runSupabaseMutation("Duplicating recipe", "Recipe duplicated.", async () => {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const { data: duplicate, error: duplicateError } = await supabase
+        .from("recipes")
+        .insert({
+          business_id: context.businessId,
+          name: `${recipe.name} copy`,
+          recipe_code: recipe.code ? `${recipe.code}-COPY` : null,
+          category: recipe.category,
+          description: recipe.description,
+          status: "draft",
+          created_by: context.userId,
+        })
+        .select("*")
+        .single();
+      if (duplicateError) throw duplicateError;
+
+      const { data: version, error: versionError } = await supabase
+        .from("recipe_versions")
+        .insert({
+          recipe_id: duplicate.id,
+          version_number: 1,
+          main_ingredient_id: recipeMainLine(recipe)?.ingredientId ?? null,
+          base_main_quantity: recipe.baseStartingQuantity,
+          base_main_uom: recipe.baseStartingUnit,
+          expected_yield: recipe.expectedYield,
+          expected_yield_uom: recipe.yieldUnit,
+          estimated_additional_cost: recipe.defaultAdditionalCost,
+          default_pricing_method: pricingMethodToDb(recipe.pricingMethod),
+          default_pricing_percentage: recipe.pricingPercentage,
+          default_selling_unit_quantity: sellingUnitToDb(recipe.defaultSellingUnit).quantity,
+          default_selling_unit_uom: sellingUnitToDb(recipe.defaultSellingUnit).uom,
+          method_introduction: recipe.methodIntro,
+          created_by: context.userId,
+        })
+        .select("*")
+        .single();
+      if (versionError) throw versionError;
+
+      for (const line of recipe.formulaLines) {
+        const ingredient = ingredientMap.get(line.ingredientId);
+        if (!ingredient) continue;
+        const { error } = await supabase.from("recipe_formula_lines").insert({
+          recipe_version_id: version.id,
+          ingredient_id: line.ingredientId,
+          formula_quantity: line.quantity,
+          formula_uom: line.unit,
+          converted_base_quantity: convertQuantity(line.quantity, line.unit, ingredient.baseUnit),
+          ingredient_cost_snapshot: ingredientUnitCost(ingredient),
+          line_cost: formulaLineCost(line, ingredientMap),
+          is_main_ingredient: line.isMain,
+          is_optional: line.optional,
+          wastage_percentage: line.wastage,
+          notes: line.notes,
+          sort_order: line.sortOrder,
+        });
+        if (error) throw error;
+      }
+
+      for (const [index, step] of recipe.methodSteps.entries()) {
+        const { error } = await supabase.from("recipe_method_steps").insert({
+          recipe_version_id: version.id,
+          step_number: index + 1,
+          title: step.title,
+          instructions: step.instructions || " ",
+          equipment: step.equipment || null,
+          notes: step.notes || null,
+        });
+        if (error) throw error;
+      }
+    });
   };
 
   const archiveRecipe = (recipeId: string) => {
-    updateRecipe(recipeId, { status: "Archived" });
-    showToast("warning", "Recipe archived.");
+    void runSupabaseMutation("Archiving recipe", "Recipe archived.", async () => {
+      const context = requireBusinessContext();
+      const { error } = await createSupabaseBrowserClient()
+        .from("recipes")
+        .update({ status: "archived", archived_at: new Date().toISOString() })
+        .eq("id", recipeId)
+        .eq("business_id", context.businessId);
+      if (error) throw error;
+    });
   };
 
   const deleteRecipe = (recipeId: string) => {
-    const fallbackRecipe = recipes.find((recipe) => recipe.id !== recipeId);
-    if (!fallbackRecipe) {
-      showToast("failed", "Keep at least one recipe in the library.");
-      return;
-    }
-    setRecipes((current) => current.filter((recipe) => recipe.id !== recipeId));
-    if (activeRecipeId === recipeId) {
-      setActiveRecipeId(fallbackRecipe.id);
-    }
-    if (productionDraft.recipeId === recipeId) {
-      setProductionDraft((current) => ({ ...current, recipeId: fallbackRecipe.id }));
-    }
-    showToast("warning", "Recipe deleted.");
+    void runSupabaseMutation("Deleting recipe", "Recipe deleted.", async () => {
+      const context = requireBusinessContext();
+      const { error } = await createSupabaseBrowserClient()
+        .from("recipes")
+        .delete()
+        .eq("id", recipeId)
+        .eq("business_id", context.businessId);
+      if (error) throw error;
+    });
   };
 
   const startProduction = () => {
-    if (startingProduction) return;
+    if (startingProduction || !selectedProductionRecipe) return;
     setStartingProduction(true);
-    const recipe = selectedProductionRecipe;
-    const lines = productionLinesForRecipe(
-      recipe,
-      productionDraft.mainQuantity,
-      productionDraft.mainUnit,
-      ingredientMap,
-    );
-    const production: ProductionBatch = {
-      id: makeId("production"),
-      batchNumber: `PB-${Date.now().toString(36).slice(-6).toUpperCase()}`,
-      recipeId: recipe.id,
-      recipeName: recipe.name,
-      recipeVersion: recipe.version,
-      status: "In Progress",
-      mainQuantity: productionDraft.mainQuantity,
-      mainUnit: productionDraft.mainUnit,
-      startDate: productionDraft.startDate,
-      endDate: "",
-      responsible: productionDraft.responsible,
-      location: productionDraft.location,
-      expectedCompletion: "2026-07-24T08:00",
-      notes: productionDraft.notes,
-      outcomeNotes: "",
-      completedBy: "",
-      qualityRating: "",
-      startingYield: productionDraft.mainQuantity,
-      completedYield: 0,
-      yieldUnit: productionDraft.mainUnit,
-      methodSnapshot: cloneMethod(recipe.methodSteps),
-      formulaSnapshot: cloneFormula(recipe.formulaLines),
-      lines,
-      additionalCosts: [
-        {
-          id: makeId("cost"),
-          type: "Labour",
-          description: "Production labour",
-          quantity: 1,
-          rate: 85,
-          notes: "",
-        },
-      ],
-    };
-    setProductions((current) => [production, ...current]);
-    window.setTimeout(() => {
-      setStartingProduction(false);
-      showToast("success", "Production started.");
-      navigate(`/productions/${production.id}`);
-    }, 500);
+    void runSupabaseMutation("Starting production", "Production started.", async () => {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase.rpc("start_production_batch", {
+        p_business_id: context.businessId,
+        p_location_id: context.locationId,
+        p_recipe_id: selectedProductionRecipe.id,
+        p_recipe_version_id: selectedProductionRecipe.versionId ?? null,
+        p_actual_main_quantity: productionDraft.mainQuantity,
+        p_actual_main_uom: productionDraft.mainUnit,
+        p_start_datetime:
+          productionDraft.startDate || new Date().toISOString(),
+        p_responsible_user_id: context.userId,
+        p_notes: productionDraft.notes || null,
+      });
+      if (error) throw error;
+      if (data?.id) navigate(`/productions/${data.id}`);
+    }).finally(() => setStartingProduction(false));
   };
 
   const updateProduction = (id: string, patch: Partial<ProductionBatch>) => {
+    const currentProduction = productions.find((production) => production.id === id);
+    const nextProduction = currentProduction ? { ...currentProduction, ...patch } : null;
     setProductions((current) =>
       current.map((production) =>
         production.id === id ? { ...production, ...patch } : production,
       ),
     );
+    if (!nextProduction) return;
+
+    void runSupabaseMutation("Saving production", "Production saved.", async () => {
+      const dbPatch: TablesUpdate<"production_batches"> = {};
+      if ("status" in patch) dbPatch.status = productionStatusToDb(nextProduction.status);
+      if ("endDate" in patch) dbPatch.end_datetime = nextProduction.endDate || null;
+      if ("startingYield" in patch) dbPatch.starting_yield = nextProduction.startingYield;
+      if ("completedYield" in patch) dbPatch.completed_yield = nextProduction.completedYield;
+      if ("yieldUnit" in patch) dbPatch.completed_yield_uom = nextProduction.yieldUnit;
+      if ("completedBy" in patch) dbPatch.completed_by = currentUser?.id ?? null;
+      if ("qualityRating" in patch) dbPatch.quality_rating = nextProduction.qualityRating ? Number(nextProduction.qualityRating) : null;
+      if ("outcomeNotes" in patch) dbPatch.outcome_notes = nextProduction.outcomeNotes || null;
+      if (!Object.keys(dbPatch).length) return;
+      const { error } = await createSupabaseBrowserClient()
+        .from("production_batches")
+        .update(dbPatch)
+        .eq("id", id);
+      if (error) throw error;
+    });
   };
 
   const updateProductionLine = (
@@ -1374,6 +1750,9 @@ export default function RecipeCostApp({
     lineId: string,
     patch: Partial<ProductionLine>,
   ) => {
+    const currentProduction = productions.find((production) => production.id === productionId);
+    const currentLine = currentProduction?.lines.find((line) => line.id === lineId);
+    const nextLine = currentLine ? { ...currentLine, ...patch } : null;
     setProductions((current) =>
       current.map((production) =>
         production.id === productionId
@@ -1399,6 +1778,22 @@ export default function RecipeCostApp({
           : production,
       ),
     );
+    if (!nextLine) return;
+    void runSupabaseMutation("Saving production line", "Production line saved.", async () => {
+      const { error } = await createSupabaseBrowserClient()
+        .from("production_ingredient_lines")
+        .update({
+          actual_quantity: nextLine.actualQuantity,
+          actual_uom: nextLine.actualUnit,
+          actual_line_cost: nextLine.actualCost,
+          quantity_variance: nextLine.actualQuantity - nextLine.requiredQuantity,
+          cost_variance: nextLine.actualCost - nextLine.expectedCost,
+          notes: nextLine.notes,
+        })
+        .eq("id", lineId)
+        .eq("production_batch_id", productionId);
+      if (error) throw error;
+    });
   };
 
   const completeProduction = (production: ProductionBatch) => {
@@ -1412,33 +1807,25 @@ export default function RecipeCostApp({
       return;
     }
 
-    const ingredientCost = production.lines.reduce(
-      (sum, line) => sum + line.actualCost,
-      0,
-    );
-    const additionalCost = production.additionalCosts.reduce(
-      (sum, cost) => sum + cost.quantity * cost.rate,
-      0,
-    );
-    const totalCost = ingredientCost + additionalCost;
-    const costPerYield =
-      production.completedYield > 0 ? totalCost / production.completedYield : 0;
-    const recipe = recipes.find((item) => item.id === production.recipeId);
-    const unitCost = costPerYield * sellingUnitQuantity(recipe?.defaultSellingUnit ?? "Per kg");
-    const finalSellingPrice = sellingPrice(
-      unitCost,
-      recipe?.pricingMethod ?? "Gross Margin",
-      recipe?.pricingPercentage ?? 40,
-    );
-
-    updateProduction(production.id, {
-      status: "Completed",
-      finalTotalCost: totalCost,
-      finalCostPerYield: costPerYield,
-      finalSellingPrice,
+    void runSupabaseMutation("Completing production", "Production completed.", async () => {
+      const { error } = await createSupabaseBrowserClient().rpc(
+        "complete_production_batch",
+        {
+          p_production_batch_id: production.id,
+          p_end_datetime: production.endDate,
+          p_starting_yield: production.startingYield,
+          p_completed_yield: production.completedYield,
+          p_completed_yield_uom: production.yieldUnit,
+          p_completed_by: currentUser?.id ?? null,
+          p_quality_rating: production.qualityRating
+            ? Number(production.qualityRating)
+            : null,
+          p_outcome_notes: production.outcomeNotes || null,
+        },
+      );
+      if (error) throw error;
+      navigate("/productions/completed");
     });
-    showToast("success", "Production completed.");
-    navigate("/productions/completed");
   };
 
   const pageTitle = pageTitleForPath(pathname);
@@ -1475,9 +1862,16 @@ export default function RecipeCostApp({
             <p>{pageTitle.description}</p>
           </div>
           <div className="topbar-actions" aria-label="Primary actions">
+            {mutationLabel ? <span className="muted-cell">{mutationLabel}...</span> : null}
+            {currentUser ? (
+              <button type="button" className="ghost-button" onClick={signOut}>
+                Sign out
+              </button>
+            ) : null}
             <button
               type="button"
               className="ghost-button"
+              disabled={supabaseState !== "ready" || Boolean(mutationLabel)}
               onClick={() => navigate("/productions/new")}
             >
               New Production
@@ -1485,6 +1879,7 @@ export default function RecipeCostApp({
             <button
               type="button"
               className="primary-button"
+              disabled={supabaseState !== "ready" || Boolean(mutationLabel)}
               onClick={createRecipe}
             >
               New Recipe
@@ -1492,28 +1887,32 @@ export default function RecipeCostApp({
           </div>
         </header>
 
-        {pathname === "/" || pathname === "/dashboard"
-          ? renderDashboard()
-          : pathname === "/ingredients"
-            ? renderIngredientsBible()
-            : pathname === "/recipes"
-              ? renderRecipesList()
-              : pathname === "/recipes/new" ||
-                  /^\/recipes\/[^/]+(\/edit)?$/.test(pathname)
-                ? renderRecipeWorkspace()
-                : pathname === "/productions" || pathname === "/productions/"
-                  ? renderProductionsSummary()
-                  : pathname === "/productions/new"
-                    ? renderNewProduction()
-                    : pathname === "/productions/in-progress"
-                      ? renderInProgress()
-                      : pathname === "/productions/completed"
-                        ? renderCompletedProductions()
-                        : /^\/productions\/[^/]+$/.test(pathname)
-                          ? renderProductionDetail()
-                          : pathname === "/reports"
-                            ? renderReports()
-                            : renderSettings()}
+        {supabaseState !== "ready"
+          ? renderSupabaseGate()
+          : isDataLoading
+            ? renderLoadingPanel()
+            : pathname === "/" || pathname === "/dashboard"
+              ? renderDashboard()
+              : pathname === "/ingredients"
+                ? renderIngredientsBible()
+                : pathname === "/recipes"
+                  ? renderRecipesList()
+                  : pathname === "/recipes/new" ||
+                      /^\/recipes\/[^/]+(\/edit)?$/.test(pathname)
+                    ? renderRecipeWorkspace()
+                    : pathname === "/productions" || pathname === "/productions/"
+                      ? renderProductionsSummary()
+                      : pathname === "/productions/new"
+                        ? renderNewProduction()
+                        : pathname === "/productions/in-progress"
+                          ? renderInProgress()
+                          : pathname === "/productions/completed"
+                            ? renderCompletedProductions()
+                            : /^\/productions\/[^/]+$/.test(pathname)
+                              ? renderProductionDetail()
+                              : pathname === "/reports"
+                                ? renderReports()
+                                : renderSettings()}
       </section>
 
       <aside className="sidebar" aria-label="Primary application navigation">
@@ -1574,6 +1973,72 @@ export default function RecipeCostApp({
       </nav>
     </main>
   );
+
+  function renderSupabaseGate() {
+    const copy =
+      supabaseState === "checking"
+        ? "Connecting to Supabase and checking your session."
+        : supabaseState === "no-business"
+          ? "Your account is signed in, but it is not linked to an active business yet."
+          : supabaseState === "failed"
+            ? "Supabase could not be reached. Check the environment configuration and connection."
+            : "Sign in with Supabase to load ingredients, recipes, productions and costing records.";
+
+    return (
+      <section className="page-stack">
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>Supabase backend</h2>
+              <p>{copy}</p>
+            </div>
+          </div>
+          {supabaseState === "unauthenticated" ? (
+            <div className="form-grid two">
+              <Field label="Email address">
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="name@example.com"
+                />
+              </Field>
+              <div className="field">
+                <span>&nbsp;</span>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={authSubmitting}
+                  onClick={sendMagicLink}
+                >
+                  {authSubmitting ? "Sending..." : "Send Magic Link"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {supabaseState === "failed" || supabaseState === "no-business" ? (
+            <button type="button" className="compact-button" onClick={() => void loadSupabaseData()}>
+              Retry
+            </button>
+          ) : null}
+        </section>
+      </section>
+    );
+  }
+
+  function renderLoadingPanel() {
+    return (
+      <section className="panel">
+        <div className="section-title">
+          <div>
+            <h2>Loading Supabase records</h2>
+            <p>Fetching business-scoped ingredients, recipes and productions.</p>
+          </div>
+        </div>
+        <div className="sheet-empty">Loading rows...</div>
+      </section>
+    );
+  }
 
   function renderDashboard() {
     const draftRecipes = recipes.filter((recipe) => recipe.status === "Draft").length;
@@ -1966,6 +2431,21 @@ export default function RecipeCostApp({
       pathname === "/recipes/new"
         ? activeRecipe
         : recipes.find((item) => item.id === idFromPath) ?? activeRecipe;
+    if (!recipe) {
+      return (
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>No recipe selected</h2>
+              <p>Create an ingredient first, then add the first Supabase-backed recipe.</p>
+            </div>
+            <button type="button" className="primary-button" onClick={createRecipe}>
+              Create Recipe
+            </button>
+          </div>
+        </section>
+      );
+    }
     const isReadOnly = /^\/recipes\/[^/]+$/.test(pathname);
     const formulaCost = recipeFormulaCost(recipe, ingredientMap);
     const expectedTotal = formulaCost + recipe.defaultAdditionalCost;
@@ -2418,6 +2898,21 @@ export default function RecipeCostApp({
   }
 
   function renderNewProduction() {
+    if (!selectedProductionRecipe) {
+      return (
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>New Production</h2>
+              <p>Create and save a recipe before starting a production batch.</p>
+            </div>
+            <button type="button" className="primary-button" onClick={createRecipe}>
+              Create Recipe
+            </button>
+          </div>
+        </section>
+      );
+    }
     const recipeFromQuery = query.get("recipeId");
     if (recipeFromQuery && recipeFromQuery !== productionDraft.recipeId) {
       window.setTimeout(() =>

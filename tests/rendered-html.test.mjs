@@ -38,7 +38,8 @@ test("server-renders the routed recipe costing application", async () => {
   assert.match(html, />Productions</);
   assert.match(html, />Reports</);
   assert.match(html, />Settings</);
-  assert.match(html, /Current activity/);
+  assert.match(html, /Supabase backend/);
+  assert.match(html, /Connecting to Supabase/);
   assert.match(html, /mobile-bottom-nav/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
   assert.doesNotMatch(html, /Your site is taking shape|SkeletonPreview/i);
@@ -62,35 +63,44 @@ test("renders independent ingredient, recipe and production routes", async () =>
     productionResponse.text(),
   ]);
 
-  assert.match(ingredientsHtml, /Search ingredient or SKU/);
-  assert.match(ingredientsHtml, />\+ Ingredient</);
-  assert.match(ingredientsHtml, /Duplicate/);
-  assert.match(ingredientsHtml, /Archive/);
+  assert.match(ingredientsHtml, /Ingredients Bible/);
+  assert.match(ingredientsHtml, /Supabase backend/);
+  assert.match(ingredientsHtml, /Connecting to Supabase/);
 
-  assert.match(recipesHtml, /Traditional Silverside Biltong/);
-  assert.match(recipesHtml, />View</);
-  assert.match(recipesHtml, />Edit</);
-  assert.match(recipesHtml, />Delete</);
-  assert.match(recipesHtml, /Create Production/);
+  assert.match(recipesHtml, />Recipes</);
+  assert.match(recipesHtml, /Supabase backend/);
+  assert.match(recipesHtml, /Connecting to Supabase/);
 
   assert.match(productionHtml, /New Production/);
-  assert.match(productionHtml, /Scaling Factor/);
-  assert.match(productionHtml, /Calculated production ingredients/);
-  assert.match(productionHtml, /Production method snapshot/);
+  assert.match(productionHtml, /Supabase backend/);
+  assert.match(productionHtml, /Connecting to Supabase/);
 });
 
-test("keeps starter preview code removed", async () => {
-  const [page, layout, css, packageJson] = await Promise.all([
+test("keeps starter preview code removed and includes Supabase setup", async () => {
+  const [page, layout, css, packageJson, envExample, migration, supabaseReadme] =
+    await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../.env.example", import.meta.url), "utf8"),
+    readFile(
+      new URL(
+        "../supabase/migrations/202607230001_initial_production_controller.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(new URL("../supabase/README.md", import.meta.url), "utf8"),
   ]);
 
   assert.match(packageJson, /"name": "recipe-cost-calculator"/);
+  assert.match(packageJson, /"@supabase\/supabase-js"/);
+  assert.match(packageJson, /"@supabase\/ssr"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(page, /function convertQuantity/);
-  assert.match(page, /recipe-cost-calculator:v2-application-data/);
+  assert.match(page, /createSupabaseBrowserClient/);
+  assert.match(page, /signInWithOtp/);
   assert.match(page, /const deleteRecipe/);
   assert.match(page, /Ingredients Bible/);
   assert.match(page, /Calculated production ingredients/);
@@ -104,6 +114,13 @@ test("keeps starter preview code removed", async () => {
   assert.match(css, /\.recipes-list-sheet/);
   assert.match(css, /\.mobile-records/);
   assert.match(css, /\.mobile-bottom-nav/);
+  assert.match(envExample, /NEXT_PUBLIC_SUPABASE_URL=/);
+  assert.match(envExample, /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=/);
+  assert.match(migration, /enable row level security/i);
+  assert.match(migration, /start_production_batch/);
+  assert.match(migration, /complete_production_batch/);
+  assert.match(migration, /storage\.buckets/);
+  assert.match(supabaseReadme, /Row Level Security/);
   assert.doesNotMatch(page + layout + css, /codex-preview|_sites-preview/);
 
   await Promise.all([
@@ -117,6 +134,13 @@ test("keeps starter preview code removed", async () => {
     access(new URL("app/productions/completed/page.tsx", templateRoot)),
     access(new URL("app/reports/page.tsx", templateRoot)),
     access(new URL("app/settings/page.tsx", templateRoot)),
+    access(new URL("proxy.ts", templateRoot)),
+    access(new URL("src/lib/supabase/client.ts", templateRoot)),
+    access(new URL("src/lib/supabase/server.ts", templateRoot)),
+    access(new URL("src/lib/supabase/database.types.ts", templateRoot)),
+    access(new URL("src/lib/supabase/storage.ts", templateRoot)),
+    access(new URL("src/lib/supabase/realtime.ts", templateRoot)),
+    access(new URL("supabase/test-checklist.md", templateRoot)),
   ]);
 
   await assert.rejects(

@@ -20,15 +20,46 @@ alter table public.profiles
   alter column email set not null;
 
 alter table public.businesses
-  add column if not exists address_line_1 text,
-  add column if not exists address_line_2 text,
-  add column if not exists city text,
-  add column if not exists province_region text,
-  add column if not exists postal_code text,
-  add column if not exists country_code text not null default 'ZA',
-  add column if not exists currency_symbol text not null default 'R',
-  add column if not exists created_by uuid references auth.users(id),
+  add column if not exists address_line_1 text;
+
+alter table public.businesses
+  add column if not exists address_line_2 text;
+
+alter table public.businesses
+  add column if not exists city text;
+
+alter table public.businesses
+  add column if not exists province_region text;
+
+alter table public.businesses
+  add column if not exists postal_code text;
+
+alter table public.businesses
+  add column if not exists country_code text not null default 'ZA';
+
+alter table public.businesses
+  add column if not exists currency_symbol text not null default 'R';
+
+alter table public.businesses
+  add column if not exists created_by uuid references auth.users(id);
+
+alter table public.businesses
   add column if not exists registration_idempotency_key text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'businesses'
+      and column_name = 'registration_idempotency_key'
+  ) then
+    alter table public.businesses
+      add column registration_idempotency_key text;
+  end if;
+end;
+$$;
 
 create unique index if not exists businesses_registration_idempotency_key_idx
   on public.businesses (registration_idempotency_key)

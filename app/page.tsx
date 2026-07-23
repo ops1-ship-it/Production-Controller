@@ -13,6 +13,14 @@ import {
   supportedImportUnits,
   type IngredientFileRow,
 } from "@/src/lib/ingredients/files";
+import {
+  countryByCode,
+  countryByNameOrCode,
+  countryCurrencyOptions,
+  countryInputLabel,
+  currencyDisplay,
+  defaultCountryCurrency,
+} from "@/src/lib/business/countries";
 import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
 import { normalizeSupabaseError } from "@/src/lib/supabase/errors";
 import type { Json, Tables, TablesUpdate } from "@/src/lib/supabase/types";
@@ -182,6 +190,34 @@ type BusinessContext = {
   locationId: string | null;
   userId: string;
   userEmail: string;
+  countryCode: string;
+  currencyCode: string;
+  currencySymbol: string;
+};
+
+type HomeAuthMode = "login" | "register" | "forgot" | "verify";
+
+type RegistrationStep = "user" | "business" | "review";
+
+type RegistrationDraft = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  contactNumber: string;
+  password: string;
+  confirmPassword: string;
+  businessName: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  provinceRegion: string;
+  postalCode: string;
+  countryCode: string;
+  currencyCode: string;
+  currencySymbol: string;
+  timezone: string;
+  confirmInformation: boolean;
+  idempotencyKey: string;
 };
 
 type IngredientLookup = {
@@ -533,10 +569,33 @@ function formatNumber(value: number, digits = 2) {
   }).format(Number.isFinite(value) ? value : 0);
 }
 
-function formatCurrency(value: number, digits = 2) {
-  return new Intl.NumberFormat("en-ZA", {
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function normalizePhone(value: string) {
+  return value.trim().replace(/[^\d+()\-\s.]/g, "").replace(/\s+/g, " ");
+}
+
+function passwordStrengthErrors(password: string) {
+  const errors: string[] = [];
+  if (password.length < 8) errors.push("Use at least 8 characters.");
+  if (!/[A-Z]/.test(password)) errors.push("Add an uppercase letter.");
+  if (!/[a-z]/.test(password)) errors.push("Add a lowercase letter.");
+  if (!/\d/.test(password)) errors.push("Add a number.");
+  return errors;
+}
+
+function formatCurrency(
+  value: number,
+  digits = 2,
+  currencyCode = "ZAR",
+  countryCode = "ZA",
+) {
+  const country = countryByCode(countryCode);
+  return new Intl.NumberFormat(country.locale, {
     style: "currency",
-    currency: "ZAR",
+    currency: currencyCode,
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(Number.isFinite(value) ? value : 0);
@@ -967,8 +1026,32 @@ const emptyAppData: AppData = {
   productions: [],
 };
 
+function defaultRegistrationDraft(): RegistrationDraft {
+  const country = defaultCountryCurrency;
+  return {
+    firstName: "",
+    lastName: "",
+    email: "",
+    contactNumber: "",
+    password: "",
+    confirmPassword: "",
+    businessName: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    provinceRegion: "",
+    postalCode: "",
+    countryCode: country.countryCode,
+    currencyCode: country.defaultCurrencyCode,
+    currencySymbol: country.currencySymbol,
+    timezone: country.defaultTimezone,
+    confirmInformation: false,
+    idempotencyKey: makeId("registration"),
+  };
+}
+
 export default function RecipeCostApp({
-  initialPath = "/dashboard",
+  initialPath = "/",
 }: {
   initialPath?: string;
 }) {
@@ -991,6 +1074,20 @@ export default function RecipeCostApp({
   const [ingredientCategories, setIngredientCategories] = useState<IngredientLookup[]>([]);
   const [ingredientSuppliers, setIngredientSuppliers] = useState<IngredientLookup[]>([]);
   const [authEmail, setAuthEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [homeAuthMode, setHomeAuthMode] = useState<HomeAuthMode>("login");
+  const [registrationStep, setRegistrationStep] =
+    useState<RegistrationStep>("user");
+  const [registrationDraft, setRegistrationDraft] = useState<RegistrationDraft>(
+    () => defaultRegistrationDraft(),
+  );
+  const [showRegistrationPassword, setShowRegistrationPassword] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [countrySearch, setCountrySearch] = useState(
+    countryInputLabel(defaultCountryCurrency),
+  );
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [mutationLabel, setMutationLabel] = useState("");
@@ -1047,6 +1144,16 @@ export default function RecipeCostApp({
   const selectedProductionRecipe =
     recipes.find((recipe) => recipe.id === productionDraft.recipeId) ??
     activeRecipe;
+  const formatMoney = useCallback(
+    (value: number, digits = 2) =>
+      formatCurrency(
+        value,
+        digits,
+        businessContext?.currencyCode ?? defaultCountryCurrency.defaultCurrencyCode,
+        businessContext?.countryCode ?? defaultCountryCurrency.countryCode,
+      ),
+    [businessContext],
+  );
 
   const recipeRows = useMemo(
     () =>
@@ -1134,7 +1241,12 @@ export default function RecipeCostApp({
   );
 
   const navigate = (href: string) => {
-    window.history.pushState(null, "", href);
+    const targetPath = href.split("?")[0] || "/";
+    const nextHref =
+      targetPath !== "/" && supabaseState === "unauthenticated"
+        ? `/?next=${encodeURIComponent(href)}`
+        : href;
+    window.history.pushState(null, "", nextHref);
     setRoute(`${window.location.pathname}${window.location.search}`);
   };
 
@@ -1217,6 +1329,14 @@ export default function RecipeCostApp({
         profileData?.default_location_id ??
         locationMembership?.location_id ??
         null;
+
+      const { data: businessData, error: businessError } = await supabase
+        .from("businesses")
+        .select("country_code, currency_code, currency_symbol")
+        .eq("id", businessId)
+        .maybeSingle();
+
+      if (businessError) throw businessError;
 
       const [
         ingredientsResult,
@@ -1366,6 +1486,11 @@ export default function RecipeCostApp({
         locationId,
         userId: user.id,
         userEmail: user.email ?? "",
+        countryCode: businessData?.country_code ?? defaultCountryCurrency.countryCode,
+        currencyCode:
+          businessData?.currency_code ?? defaultCountryCurrency.defaultCurrencyCode,
+        currencySymbol:
+          businessData?.currency_symbol ?? defaultCountryCurrency.currencySymbol,
       });
       setActiveRecipeId((current) =>
         mappedRecipes.some((recipe) => recipe.id === current)
@@ -1429,24 +1554,209 @@ export default function RecipeCostApp({
     }
   };
 
-  const sendMagicLink = async () => {
-    if (!authEmail.trim()) {
-      showToast("failed", "Enter an email address to sign in.");
+  const updateRegistrationDraft = (patch: Partial<RegistrationDraft>) => {
+    setRegistrationDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const handleCountrySelection = (value: string) => {
+    setCountrySearch(value);
+    const country = countryByNameOrCode(value);
+    if (!country) return;
+    updateRegistrationDraft({
+      countryCode: country.countryCode,
+      currencyCode: country.defaultCurrencyCode,
+      currencySymbol: country.currencySymbol,
+      timezone: country.defaultTimezone,
+    });
+  };
+
+  const validateLogin = () => {
+    const email = authEmail.trim().toLowerCase();
+    if (!email) return "Email is required.";
+    if (!isValidEmail(email)) return "Enter a valid email address.";
+    if (!loginPassword) return "Password is required.";
+    return "";
+  };
+
+  const submitLogin = async () => {
+    if (authSubmitting) return;
+    const validationError = validateLogin();
+    if (validationError) {
+      showToast("failed", validationError);
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail.trim().toLowerCase(),
+        password: loginPassword,
+      });
+      if (error) throw error;
+      await supabase.auth.refreshSession();
+      window.localStorage.setItem("remember-production-controller", rememberMe ? "yes" : "no");
+      await loadSupabaseData();
+      showToast("success", "You have logged in successfully.");
+      navigate("/dashboard");
+    } catch {
+      showToast("failed", "The email address or password is incorrect.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const submitForgotPassword = async () => {
+    if (authSubmitting) return;
+    const email = authEmail.trim().toLowerCase();
+    if (!email) {
+      showToast("failed", "Email is required.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      showToast("failed", "Enter a valid email address.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const { error } = await createSupabaseBrowserClient().auth.resetPasswordForEmail(
+        email,
+        {
+          redirectTo: `${window.location.origin}/`,
+        },
+      );
+      if (error) throw error;
+      showToast("success", "If an account exists, a password reset email has been sent.");
+      setHomeAuthMode("login");
+    } catch {
+      showToast("failed", "The password reset email could not be sent. Try again.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const validateRegistrationUser = () => {
+    const email = registrationDraft.email.trim().toLowerCase();
+    const passwordErrors = passwordStrengthErrors(registrationDraft.password);
+    if (!registrationDraft.firstName.trim()) return "First Name is required.";
+    if (!registrationDraft.lastName.trim()) return "Last Name is required.";
+    if (!email) return "Email Address is required.";
+    if (!isValidEmail(email)) return "Enter a valid email address.";
+    if (!registrationDraft.contactNumber.trim()) return "Contact Number is required.";
+    if (!registrationDraft.password) return "Password is required.";
+    if (passwordErrors.length) return passwordErrors.join(" ");
+    if (registrationDraft.confirmPassword !== registrationDraft.password) {
+      return "Confirm Password must match Password.";
+    }
+    return "";
+  };
+
+  const validateRegistrationBusiness = () => {
+    const country = countryByCode(registrationDraft.countryCode);
+    if (!registrationDraft.businessName.trim()) return "Business Name is required.";
+    if (!country.countryCode) return "Country is required.";
+    if (!registrationDraft.currencyCode.trim()) return "Currency is required.";
+    return "";
+  };
+
+  const advanceRegistration = () => {
+    const validationError =
+      registrationStep === "user"
+        ? validateRegistrationUser()
+        : validateRegistrationBusiness();
+    if (validationError) {
+      showToast("failed", validationError);
+      return;
+    }
+    setRegistrationStep(registrationStep === "user" ? "business" : "review");
+  };
+
+  const submitRegistration = async () => {
+    if (authSubmitting) return;
+    const validationError =
+      validateRegistrationUser() || validateRegistrationBusiness();
+    if (validationError) {
+      showToast("failed", validationError);
+      return;
+    }
+    if (!registrationDraft.confirmInformation) {
+      showToast("failed", "Confirm that the information provided is correct.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const country = countryByCode(registrationDraft.countryCode);
+      const email = registrationDraft.email.trim().toLowerCase();
+      const { data, error } = await createSupabaseBrowserClient().auth.signUp({
+        email,
+        password: registrationDraft.password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/dashboard`,
+          data: {
+            registration_intent: "owner_business",
+            registration_idempotency_key: registrationDraft.idempotencyKey,
+            first_name: registrationDraft.firstName.trim(),
+            last_name: registrationDraft.lastName.trim(),
+            email,
+            contact_number: normalizePhone(registrationDraft.contactNumber),
+            country_calling_code: country.callingCode,
+            business_name: registrationDraft.businessName.trim(),
+            address_line_1: registrationDraft.addressLine1.trim(),
+            address_line_2: registrationDraft.addressLine2.trim(),
+            city: registrationDraft.city.trim(),
+            province_region: registrationDraft.provinceRegion.trim(),
+            postal_code: registrationDraft.postalCode.trim(),
+            country_code: country.countryCode,
+            currency_code: registrationDraft.currencyCode.trim().toUpperCase(),
+            currency_symbol: registrationDraft.currencySymbol.trim(),
+            timezone: registrationDraft.timezone,
+          },
+        },
+      });
+      if (error) throw error;
+
+      setVerificationEmail(email);
+      if (data.session) {
+        await loadSupabaseData();
+        showToast("success", "Your account and business have been created.");
+        setRegistrationDraft(defaultRegistrationDraft());
+        setRegistrationStep("user");
+        navigate("/dashboard");
+      } else {
+        setHomeAuthMode("verify");
+        showToast("success", "Check your email to complete registration.");
+      }
+    } catch {
+      showToast(
+        "failed",
+        "Registration could not be completed. Review the details and try again.",
+      );
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const resendVerificationEmail = async () => {
+    const email = verificationEmail || registrationDraft.email.trim().toLowerCase();
+    if (!email || !isValidEmail(email)) {
+      showToast("failed", "Enter a valid email address to resend verification.");
       return;
     }
     setAuthSubmitting(true);
     try {
-      const supabase = createSupabaseBrowserClient();
-      const { error } = await supabase.auth.signInWithOtp({
-        email: authEmail.trim(),
+      const { error } = await createSupabaseBrowserClient().auth.resend({
+        type: "signup",
+        email,
         options: {
-          emailRedirectTo: window.location.origin,
+          emailRedirectTo: `${window.location.origin}/dashboard`,
         },
       });
       if (error) throw error;
-      showToast("success", "Check your email for the sign-in link.");
-    } catch (error) {
-      showToast("failed", normalizeSupabaseError(error));
+      showToast("success", "Verification email sent.");
+    } catch {
+      showToast("failed", "Verification email could not be sent. Try again.");
     } finally {
       setAuthSubmitting(false);
     }
@@ -1462,6 +1772,7 @@ export default function RecipeCostApp({
       setCurrentUser(null);
       setSupabaseState("unauthenticated");
     });
+    navigate("/");
   };
 
   const requireBusinessContext = () => {
@@ -1499,6 +1810,8 @@ export default function RecipeCostApp({
           currencyColumns: [6],
           currency4Columns: [8],
           numericColumns: [4, 9],
+          currencySymbol:
+            businessContext?.currencySymbol ?? defaultCountryCurrency.currencySymbol,
         },
       ]),
       `ingredients-list-${fileStamp()}.xlsx`,
@@ -1544,6 +1857,8 @@ export default function RecipeCostApp({
           autoFilter: true,
           currencyColumns: [6],
           numericColumns: [4, 8],
+          currencySymbol:
+            businessContext?.currencySymbol ?? defaultCountryCurrency.currencySymbol,
           dropdowns: {
             5: importUnits,
             7: importUnits,
@@ -2573,30 +2888,42 @@ export default function RecipeCostApp({
   };
 
   const pageTitle = pageTitleForPath(pathname);
+  const toastRegion = (
+    <div className="toast-region" aria-live="polite" aria-atomic="true">
+      {toast ? (
+        <div className={`toast ${toast.kind}`} role="status">
+          <span className="toast-icon" aria-hidden="true">
+            {toast.kind === "success" ? "+" : toast.kind === "info" ? "i" : "!"}
+          </span>
+          <span>
+            <strong>
+              {toast.kind === "success"
+                ? "Successful"
+                : toast.kind === "failed"
+                  ? "Failed"
+                  : toast.kind === "warning"
+                    ? "Attention"
+                    : "Notice"}
+            </strong>
+            <small>{toast.message}</small>
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  if (pathname === "/") {
+    return (
+      <main className="public-home-shell">
+        {toastRegion}
+        {renderPublicHome()}
+      </main>
+    );
+  }
 
   return (
     <main className="app-shell">
-      <div className="toast-region" aria-live="polite" aria-atomic="true">
-        {toast ? (
-          <div className={`toast ${toast.kind}`} role="status">
-            <span className="toast-icon" aria-hidden="true">
-              {toast.kind === "success" ? "+" : toast.kind === "info" ? "i" : "!"}
-            </span>
-            <span>
-              <strong>
-                {toast.kind === "success"
-                  ? "Successful"
-                  : toast.kind === "failed"
-                    ? "Failed"
-                    : toast.kind === "warning"
-                      ? "Attention"
-                      : "Notice"}
-              </strong>
-              <small>{toast.message}</small>
-            </span>
-          </div>
-        ) : null}
-      </div>
+      {toastRegion}
 
       <section className="workspace">
         <header className="topbar">
@@ -2718,6 +3045,482 @@ export default function RecipeCostApp({
     </main>
   );
 
+  function renderPublicHome() {
+    return (
+      <section className="home-auth-layout">
+        <section className="home-product-panel" aria-label="Product overview">
+          <p className="eyebrow">Production Controller</p>
+          <h1>Production Controller</h1>
+          <p>
+            Create production formulas, scale ingredient quantities, track active
+            production batches, calculate completed yields and determine accurate
+            production costs and selling prices.
+          </p>
+          <div className="home-feature-grid">
+            <div><strong>Formula control</strong><span>Recipe versions, units and costs.</span></div>
+            <div><strong>Production tracking</strong><span>Active batches and completion snapshots.</span></div>
+            <div><strong>Cost accuracy</strong><span>Ingredient, yield and selling price calculations.</span></div>
+          </div>
+        </section>
+
+        <section className="auth-panel" aria-label="Authentication">
+          <div className="auth-panel-heading">
+            <span className="brand-mark">PC</span>
+            <div>
+              <h2>
+                {homeAuthMode === "register"
+                  ? "Create account"
+                  : homeAuthMode === "forgot"
+                    ? "Reset password"
+                    : homeAuthMode === "verify"
+                      ? "Verify your email"
+                      : "Login"}
+              </h2>
+              <p>
+                {homeAuthMode === "register"
+                  ? "Set up your user account and first business."
+                  : homeAuthMode === "forgot"
+                    ? "We will send reset instructions if the email exists."
+                    : homeAuthMode === "verify"
+                      ? "Open the link in your email to complete registration."
+                      : "Sign in to open your protected dashboard."}
+              </p>
+            </div>
+          </div>
+
+          {homeAuthMode !== "verify" ? (
+            <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+              <button
+                type="button"
+                className={homeAuthMode === "login" ? "active" : ""}
+                onClick={() => setHomeAuthMode("login")}
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                className={homeAuthMode === "register" ? "active" : ""}
+                onClick={() => setHomeAuthMode("register")}
+              >
+                Register
+              </button>
+            </div>
+          ) : null}
+
+          {homeAuthMode === "login"
+            ? renderLoginPanel()
+            : homeAuthMode === "forgot"
+              ? renderForgotPasswordPanel()
+              : homeAuthMode === "verify"
+                ? renderVerificationPanel()
+                : renderRegistrationPanel()}
+        </section>
+      </section>
+    );
+  }
+
+  function renderLoginPanel() {
+    return (
+      <form
+        className="auth-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submitLogin();
+        }}
+      >
+        <Field label="Email address" required>
+          <input
+            type="email"
+            autoComplete="email"
+            value={authEmail}
+            onChange={(event) => setAuthEmail(event.target.value)}
+            placeholder="name@example.com"
+          />
+        </Field>
+        <Field label="Password" required>
+          <span className="password-control">
+            <input
+              type={showLoginPassword ? "text" : "password"}
+              autoComplete="current-password"
+              value={loginPassword}
+              onChange={(event) => setLoginPassword(event.target.value)}
+            />
+            <button
+              type="button"
+              className="compact-button"
+              onClick={() => setShowLoginPassword((current) => !current)}
+            >
+              {showLoginPassword ? "Hide" : "Show"}
+            </button>
+          </span>
+        </Field>
+        <div className="auth-row">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(event) => setRememberMe(event.target.checked)}
+            />
+            Remember me
+          </label>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => setHomeAuthMode("forgot")}
+          >
+            Forgot password
+          </button>
+        </div>
+        <button
+          type="submit"
+          className="primary-button block-action"
+          disabled={authSubmitting}
+        >
+          {authSubmitting ? "Logging in..." : "Login"}
+        </button>
+      </form>
+    );
+  }
+
+  function renderForgotPasswordPanel() {
+    return (
+      <form
+        className="auth-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submitForgotPassword();
+        }}
+      >
+        <Field label="Email address" required>
+          <input
+            type="email"
+            autoComplete="email"
+            value={authEmail}
+            onChange={(event) => setAuthEmail(event.target.value)}
+            placeholder="name@example.com"
+          />
+        </Field>
+        <button
+          type="submit"
+          className="primary-button block-action"
+          disabled={authSubmitting}
+        >
+          {authSubmitting ? "Sending..." : "Send Reset Email"}
+        </button>
+        <button
+          type="button"
+          className="ghost-button block-action"
+          onClick={() => setHomeAuthMode("login")}
+        >
+          Back to Login
+        </button>
+      </form>
+    );
+  }
+
+  function renderVerificationPanel() {
+    return (
+      <div className="auth-form">
+        <div className="verification-note">
+          <strong>Verify your email</strong>
+          <span>
+            We sent a verification link to {verificationEmail || "your email address"}.
+            Open the link to complete your registration.
+          </span>
+        </div>
+        <button
+          type="button"
+          className="primary-button block-action"
+          disabled={authSubmitting}
+          onClick={resendVerificationEmail}
+        >
+          {authSubmitting ? "Sending..." : "Resend Verification Email"}
+        </button>
+        <button
+          type="button"
+          className="ghost-button block-action"
+          onClick={() => setHomeAuthMode("login")}
+        >
+          Back to Login
+        </button>
+      </div>
+    );
+  }
+
+  function renderRegistrationPanel() {
+    const selectedCountry = countryByCode(registrationDraft.countryCode);
+    return (
+      <div className="auth-form">
+        <div className="registration-progress" aria-label="Registration progress">
+          <span className={registrationStep === "user" ? "active" : ""}>User Details</span>
+          <span aria-hidden="true">-&gt;</span>
+          <span className={registrationStep === "business" ? "active" : ""}>Business Details</span>
+          <span aria-hidden="true">-&gt;</span>
+          <span className={registrationStep === "review" ? "active" : ""}>Review</span>
+        </div>
+
+        {registrationStep === "user" ? renderRegistrationUserStep() : null}
+        {registrationStep === "business" ? renderRegistrationBusinessStep() : null}
+        {registrationStep === "review" ? renderRegistrationReview(selectedCountry) : null}
+      </div>
+    );
+  }
+
+  function renderRegistrationUserStep() {
+    const passwordErrors = passwordStrengthErrors(registrationDraft.password);
+    return (
+      <>
+        <div className="form-grid two">
+          <Field label="First Name" required>
+            <input
+              value={registrationDraft.firstName}
+              onChange={(event) => updateRegistrationDraft({ firstName: event.target.value })}
+            />
+          </Field>
+          <Field label="Last Name" required>
+            <input
+              value={registrationDraft.lastName}
+              onChange={(event) => updateRegistrationDraft({ lastName: event.target.value })}
+            />
+          </Field>
+          <Field label="Email Address" required>
+            <input
+              type="email"
+              autoComplete="email"
+              value={registrationDraft.email}
+              onChange={(event) => updateRegistrationDraft({ email: event.target.value })}
+            />
+          </Field>
+          <Field label="Contact Number" required>
+            <input
+              type="tel"
+              autoComplete="tel"
+              value={registrationDraft.contactNumber}
+              onChange={(event) =>
+                updateRegistrationDraft({ contactNumber: event.target.value })
+              }
+              placeholder="+27 82 000 0000"
+            />
+          </Field>
+        </div>
+        <Field label="Password" required>
+          <span className="password-control">
+            <input
+              type={showRegistrationPassword ? "text" : "password"}
+              autoComplete="new-password"
+              value={registrationDraft.password}
+              onChange={(event) =>
+                updateRegistrationDraft({ password: event.target.value })
+              }
+            />
+            <button
+              type="button"
+              className="compact-button"
+              onClick={() => setShowRegistrationPassword((current) => !current)}
+            >
+              {showRegistrationPassword ? "Hide" : "Show"}
+            </button>
+          </span>
+        </Field>
+        <Field label="Confirm Password" required>
+          <input
+            type={showRegistrationPassword ? "text" : "password"}
+            autoComplete="new-password"
+            value={registrationDraft.confirmPassword}
+            onChange={(event) =>
+              updateRegistrationDraft({ confirmPassword: event.target.value })
+            }
+          />
+        </Field>
+        <div className="password-hints">
+          {(passwordErrors.length ? passwordErrors : ["Password strength requirements met."]).map(
+            (hint) => (
+              <span key={hint}>{hint}</span>
+            ),
+          )}
+        </div>
+        <button type="button" className="primary-button block-action" onClick={advanceRegistration}>
+          Continue
+        </button>
+      </>
+    );
+  }
+
+  function renderRegistrationBusinessStep() {
+    return (
+      <>
+        <Field label="Business Name" required>
+          <input
+            value={registrationDraft.businessName}
+            onChange={(event) =>
+              updateRegistrationDraft({ businessName: event.target.value })
+            }
+          />
+        </Field>
+        <div className="form-grid two">
+          <Field label="Address Line 1">
+            <input
+              value={registrationDraft.addressLine1}
+              onChange={(event) =>
+                updateRegistrationDraft({ addressLine1: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Address Line 2">
+            <input
+              value={registrationDraft.addressLine2}
+              onChange={(event) =>
+                updateRegistrationDraft({ addressLine2: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="City or Town">
+            <input
+              value={registrationDraft.city}
+              onChange={(event) => updateRegistrationDraft({ city: event.target.value })}
+            />
+          </Field>
+          <Field label="Province, State or Region">
+            <input
+              value={registrationDraft.provinceRegion}
+              onChange={(event) =>
+                updateRegistrationDraft({ provinceRegion: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Postal Code">
+            <input
+              value={registrationDraft.postalCode}
+              onChange={(event) =>
+                updateRegistrationDraft({ postalCode: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Country" required>
+            <input
+              list="country-options"
+              value={countrySearch}
+              onChange={(event) => handleCountrySelection(event.target.value)}
+            />
+          </Field>
+        </div>
+        <datalist id="country-options">
+          {countryCurrencyOptions.map((country) => (
+            <option key={country.countryCode} value={countryInputLabel(country)} />
+          ))}
+        </datalist>
+        <Field label="Currency" required>
+          <select
+            value={registrationDraft.currencyCode}
+            onChange={(event) => {
+              const option = countryCurrencyOptions.find(
+                (country) => country.defaultCurrencyCode === event.target.value,
+              );
+              updateRegistrationDraft({
+                currencyCode: event.target.value,
+                currencySymbol: option?.currencySymbol ?? registrationDraft.currencySymbol,
+              });
+            }}
+          >
+            {Array.from(
+              new Map(
+                countryCurrencyOptions.map((country) => [
+                  country.defaultCurrencyCode,
+                  country,
+                ]),
+              ).values(),
+            ).map((country) => (
+              <option key={country.defaultCurrencyCode} value={country.defaultCurrencyCode}>
+                {currencyDisplay(country)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="auth-row">
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => setRegistrationStep("user")}
+          >
+            Back
+          </button>
+          <button type="button" className="primary-button" onClick={advanceRegistration}>
+            Review
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  function renderRegistrationReview(selectedCountry: ReturnType<typeof countryByCode>) {
+    const selectedCurrency =
+      countryCurrencyOptions.find(
+        (country) =>
+          country.defaultCurrencyCode === registrationDraft.currencyCode,
+      ) ?? selectedCountry;
+    const address = [
+      registrationDraft.addressLine1,
+      registrationDraft.addressLine2,
+      registrationDraft.city,
+      registrationDraft.provinceRegion,
+      registrationDraft.postalCode,
+      selectedCountry.countryName,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    return (
+      <>
+        <div className="registration-review">
+          <div>
+            <span>User</span>
+            <strong>
+              {registrationDraft.firstName.trim()} {registrationDraft.lastName.trim()}
+            </strong>
+            <small>{registrationDraft.email.trim().toLowerCase()}</small>
+            <small>{normalizePhone(registrationDraft.contactNumber)}</small>
+          </div>
+          <div>
+            <span>Business</span>
+            <strong>{registrationDraft.businessName.trim()}</strong>
+            <small>{address || selectedCountry.countryName}</small>
+            <small>{currencyDisplay(selectedCurrency)}</small>
+          </div>
+        </div>
+        <label className="check-row confirm-row">
+          <input
+            type="checkbox"
+            checked={registrationDraft.confirmInformation}
+            onChange={(event) =>
+              updateRegistrationDraft({ confirmInformation: event.target.checked })
+            }
+          />
+          I confirm that the information provided is correct.
+        </label>
+        <p className="terms-line">
+          By creating an account you agree to the <a href="#">Terms of Service</a>{" "}
+          and <a href="#">Privacy Policy</a>.
+        </p>
+        <div className="auth-row">
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => setRegistrationStep("business")}
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={authSubmitting}
+            onClick={submitRegistration}
+          >
+            {authSubmitting ? "Creating..." : "Create Account"}
+          </button>
+        </div>
+      </>
+    );
+  }
+
   function renderSupabaseGate() {
     const copy =
       supabaseState === "checking"
@@ -2726,7 +3529,7 @@ export default function RecipeCostApp({
           ? "Your account is signed in, but it is not linked to an active business yet."
           : supabaseState === "failed"
             ? "Supabase could not be reached. Check the environment configuration and connection."
-            : "Sign in with Supabase to load ingredients, recipes, productions and costing records.";
+            : "Login from the public Home page to load ingredients, recipes, productions and costing records.";
 
     return (
       <section className="page-stack">
@@ -2738,27 +3541,9 @@ export default function RecipeCostApp({
             </div>
           </div>
           {supabaseState === "unauthenticated" ? (
-            <div className="form-grid two">
-              <Field label="Email address">
-                <input
-                  type="email"
-                  value={authEmail}
-                  onChange={(event) => setAuthEmail(event.target.value)}
-                  placeholder="name@example.com"
-                />
-              </Field>
-              <div className="field">
-                <span>&nbsp;</span>
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={authSubmitting}
-                  onClick={sendMagicLink}
-                >
-                  {authSubmitting ? "Sending..." : "Send Magic Link"}
-                </button>
-              </div>
-            </div>
+            <button type="button" className="primary-button" onClick={() => navigate("/")}>
+              Go to Login
+            </button>
           ) : null}
           {supabaseState === "failed" || supabaseState === "no-business" ? (
             <button type="button" className="compact-button" onClick={() => void loadSupabaseData()}>
@@ -2825,7 +3610,7 @@ export default function RecipeCostApp({
             </div>
             <div className="summary-cell">
               <span>Ingredient purchase value</span>
-              <strong>{formatCurrency(ingredientValue)}</strong>
+              <strong>{formatMoney(ingredientValue)}</strong>
               <small>Current library purchase-cost basis.</small>
             </div>
             <div className="summary-cell">
@@ -3030,7 +3815,7 @@ export default function RecipeCostApp({
                   />
                 </span>
                 <span role="cell" className="numeric-cell strong-cell">
-                  {formatCurrency(ingredientUnitCost(ingredient), 4)}
+                  {formatMoney(ingredientUnitCost(ingredient), 4)}
                 </span>
                 <span role="cell">
                   <NumberInput
@@ -3114,7 +3899,7 @@ export default function RecipeCostApp({
                     <strong>{ingredient.name}</strong>
                     <small>{ingredient.supplier} / {ingredient.sku}</small>
                   </span>
-                  <span>{formatCurrency(ingredientUnitCost(ingredient), 4)}</span>
+                  <span>{formatMoney(ingredientUnitCost(ingredient), 4)}</span>
                 </summary>
                 <div className="record-grid">
                   <div className="record-metric">
@@ -3288,9 +4073,9 @@ export default function RecipeCostApp({
                 <span role="cell" className="muted-cell">{row.sku || "-"}</span>
                 <span role="cell" className="numeric-cell">{formatNumber(row.purchaseQuantity, 3)}</span>
                 <span role="cell">{row.purchaseUnit || "-"}</span>
-                <span role="cell" className="numeric-cell">{formatCurrency(row.purchaseCost)}</span>
+                <span role="cell" className="numeric-cell">{formatMoney(row.purchaseCost)}</span>
                 <span role="cell">{row.baseUnit || "-"}</span>
-                <span role="cell" className="numeric-cell">{formatCurrency(row.costPerBaseUnit, 4)}</span>
+                <span role="cell" className="numeric-cell">{formatMoney(row.costPerBaseUnit, 4)}</span>
                 <span role="cell">{row.active ? "Active" : "Inactive"}</span>
                 <span role="cell"><strong className={`status-chip import-result-${row.result.toLowerCase().replaceAll(" ", "-")}`}>{row.result}</strong></span>
                 <span role="cell" className="muted-cell">{row.message}</span>
@@ -3311,7 +4096,7 @@ export default function RecipeCostApp({
                     <strong>Row {row.rowNumber}: {row.name || "Unnamed"}</strong>
                     <small>{row.result}</small>
                   </span>
-                  <span>{formatCurrency(row.costPerBaseUnit, 4)}</span>
+                  <span>{formatMoney(row.costPerBaseUnit, 4)}</span>
                 </summary>
                 <div className="record-grid">
                   <div className="record-metric"><span>Category</span><strong>{row.category || "Unassigned"}</strong></div>
@@ -3405,10 +4190,10 @@ export default function RecipeCostApp({
                     {formatNumber(recipe.expectedYield, 3)} {recipe.yieldUnit}
                   </span>
                   <span role="cell" className="numeric-cell strong-cell">
-                    {formatCurrency(recipe.formulaCost)}
+                    {formatMoney(recipe.formulaCost)}
                   </span>
                   <span role="cell" className="numeric-cell">
-                    {formatCurrency(recipe.costPerYield)}
+                    {formatMoney(recipe.costPerYield)}
                   </span>
                   <span role="cell">v{recipe.version}</span>
                   <span role="cell"><strong className="status-chip muted-status">{recipe.status}</strong></span>
@@ -3433,7 +4218,7 @@ export default function RecipeCostApp({
                     <strong>{recipe.name}</strong>
                     <small>{recipe.code} / {recipe.mainIngredient}</small>
                   </span>
-                  <span>{formatCurrency(recipe.costPerYield)}</span>
+                  <span>{formatMoney(recipe.costPerYield)}</span>
                 </summary>
                 <div className="record-grid">
                   <div className="record-metric"><span>Yield</span><strong>{formatNumber(recipe.expectedYield, 3)} {recipe.yieldUnit}</strong></div>
@@ -3619,7 +4404,7 @@ export default function RecipeCostApp({
                       </select>
                     </span>
                     <span role="cell" className="numeric-cell">
-                      {formatCurrency(ingredient ? ingredientUnitCost(ingredient) : 0, 4)} /{" "}
+                      {formatMoney(ingredient ? ingredientUnitCost(ingredient) : 0, 4)} /{" "}
                       {ingredient?.baseUnit}
                     </span>
                     <span role="cell" className="quantity-pair">
@@ -3651,7 +4436,7 @@ export default function RecipeCostApp({
                       />
                     </span>
                     <span role="cell" className="numeric-cell strong-cell">
-                      {formatCurrency(formulaLineCost(line, ingredientMap))}
+                      {formatMoney(formulaLineCost(line, ingredientMap))}
                     </span>
                     <span role="cell" className="center-cell">
                       <input
@@ -3707,7 +4492,7 @@ export default function RecipeCostApp({
               <span role="cell" />
               <span role="cell" />
               <span role="cell" />
-              <span role="cell" className="numeric-cell">{formatCurrency(formulaCost)}</span>
+              <span role="cell" className="numeric-cell">{formatMoney(formulaCost)}</span>
               <span role="cell" />
               <span role="cell" />
               <span role="cell" />
@@ -3887,10 +4672,10 @@ export default function RecipeCostApp({
             <div className="metric-grid yield-metrics">
               <div><span>Expected yield %</span><strong>{formatNumber(yieldPercentage, 2)}%</strong></div>
               <div><span>Expected loss</span><strong>{formatNumber(expectedLoss, 3)} {recipe.baseStartingUnit}</strong></div>
-              <div><span>Expected total cost</span><strong>{formatCurrency(expectedTotal)}</strong></div>
-              <div><span>Cost per yield unit</span><strong>{formatCurrency(costPerYield)}</strong></div>
+              <div><span>Expected total cost</span><strong>{formatMoney(expectedTotal)}</strong></div>
+              <div><span>Cost per yield unit</span><strong>{formatMoney(costPerYield)}</strong></div>
               <div><span>Default selling unit</span><strong>{recipe.defaultSellingUnit}</strong></div>
-              <div><span>Expected selling price</span><strong>{formatCurrency(estimatedPrice)}</strong></div>
+              <div><span>Expected selling price</span><strong>{formatMoney(estimatedPrice)}</strong></div>
             </div>
           </section>
         </section>
@@ -4106,8 +4891,8 @@ export default function RecipeCostApp({
                 )}
               </span>
               <span role="cell" className="numeric-cell">{formatNumber(variance, 3)} {line.unit}</span>
-              <span role="cell" className="numeric-cell">{formatCurrency(line.expectedCost)}</span>
-              <span role="cell" className="numeric-cell strong-cell">{formatCurrency(line.actualCost)}</span>
+              <span role="cell" className="numeric-cell">{formatMoney(line.expectedCost)}</span>
+              <span role="cell" className="numeric-cell strong-cell">{formatMoney(line.actualCost)}</span>
               <span role="cell" className="muted-cell">
                 {options.productionId && !isReadOnly ? (
                   <input
@@ -4216,9 +5001,9 @@ export default function RecipeCostApp({
           </div>
           <div className="metric-grid">
             <div><span>Main quantity</span><strong>{formatNumber(production.mainQuantity, 3)} {production.mainUnit}</strong></div>
-            <div><span>Ingredient cost</span><strong>{formatCurrency(ingredientCost)}</strong></div>
-            <div><span>Additional cost</span><strong>{formatCurrency(additionalCost)}</strong></div>
-            <div><span>Current total</span><strong>{formatCurrency(ingredientCost + additionalCost)}</strong></div>
+            <div><span>Ingredient cost</span><strong>{formatMoney(ingredientCost)}</strong></div>
+            <div><span>Additional cost</span><strong>{formatMoney(additionalCost)}</strong></div>
+            <div><span>Current total</span><strong>{formatMoney(ingredientCost + additionalCost)}</strong></div>
           </div>
         </section>
         <section className="panel">
@@ -4308,9 +5093,9 @@ export default function RecipeCostApp({
                   <span role="cell">{production.endDate}</span>
                   <span role="cell" className="numeric-cell">{formatNumber(yieldPct, 2)}%</span>
                   <span role="cell" className="numeric-cell">{formatNumber(loss, 3)} {production.yieldUnit}</span>
-                  <span role="cell" className="numeric-cell strong-cell">{formatCurrency(production.finalTotalCost ?? 0)}</span>
-                  <span role="cell" className="numeric-cell">{formatCurrency(production.finalCostPerYield ?? 0)}</span>
-                  <span role="cell" className="numeric-cell">{formatCurrency(production.finalSellingPrice ?? 0)}</span>
+                  <span role="cell" className="numeric-cell strong-cell">{formatMoney(production.finalTotalCost ?? 0)}</span>
+                  <span role="cell" className="numeric-cell">{formatMoney(production.finalCostPerYield ?? 0)}</span>
+                  <span role="cell" className="numeric-cell">{formatMoney(production.finalSellingPrice ?? 0)}</span>
                   <span role="cell" className="numeric-cell">{formatNumber(margin, 2)}%</span>
                   <span role="cell" className="action-cell wide-actions">
                     <button type="button" className="compact-button" onClick={() => navigate(`/productions/${production.id}`)}>View</button>
@@ -4337,8 +5122,8 @@ export default function RecipeCostApp({
         <section className="panel">
           <div className="section-title"><div><h2>Reports</h2><p>Yield, costing and profitability summaries.</p></div></div>
           <div className="report-grid">
-            <div className="report-cell"><span>Completed cost</span><strong>{formatCurrency(totalCompletedCost)}</strong><small>Actual completed production costs.</small></div>
-            <div className="report-cell"><span>Average cost per kg</span><strong>{formatCurrency(completedProductions[0]?.finalCostPerYield ?? 0)}</strong><small>Uses completed yield.</small></div>
+            <div className="report-cell"><span>Completed cost</span><strong>{formatMoney(totalCompletedCost)}</strong><small>Actual completed production costs.</small></div>
+            <div className="report-cell"><span>Average cost per kg</span><strong>{formatMoney(completedProductions[0]?.finalCostPerYield ?? 0)}</strong><small>Uses completed yield.</small></div>
             <div className="report-cell"><span>Active batches</span><strong>{activeProductions.length}</strong><small>Not yet completed.</small></div>
             <div className="report-cell"><span>Recipe count</span><strong>{recipes.length}</strong><small>Current formulas.</small></div>
           </div>

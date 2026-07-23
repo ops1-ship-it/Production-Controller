@@ -4,8 +4,14 @@ Run this checklist after applying migrations to the target Supabase project.
 
 ## Authentication
 
-- Sign in with a Supabase magic link.
-- Confirm an unauthenticated browser sees the Supabase sign-in gate.
+- Open `/` and confirm the public Production Controller home page shows Login and Register.
+- Confirm email/password login navigates to `/dashboard` and shows a success toast.
+- Confirm incorrect login details keep the user on `/` and show a failure toast.
+- Confirm Forgot Password sends a reset email without revealing whether the email exists.
+- Complete the two-step registration workflow and confirm the first business is created.
+- Confirm the registering user receives the `owner` membership role.
+- Confirm email verification displays the verification screen when Supabase requires verification.
+- Confirm unauthenticated visits to `/dashboard`, `/ingredients`, `/recipes`, `/productions`, `/reports` and `/settings` redirect to `/`.
 - Confirm a signed-in user without `business_users` access sees the no-business state.
 - Confirm a signed-in business user can load dashboard counts.
 

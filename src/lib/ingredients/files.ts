@@ -11,6 +11,7 @@ export type XlsxSheet = {
   currencyColumns?: number[];
   currency4Columns?: number[];
   numericColumns?: number[];
+  currencySymbol?: string;
   dropdowns?: Record<number, string[]>;
   validationRowLimit?: number;
 };
@@ -168,12 +169,13 @@ function sheetXml(sheet: XlsxSheet) {
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${freezeHeader}${cols}<sheetData>${rows}</sheetData>${autoFilter}${dataValidations}</worksheet>`;
 }
 
-function stylesXml() {
+function stylesXml(currencySymbol: string) {
+  const symbol = xmlEscape(currencySymbol || "R");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <numFmts count="3">
-    <numFmt numFmtId="164" formatCode="R #,##0.00"/>
-    <numFmt numFmtId="165" formatCode="R #,##0.0000"/>
+    <numFmt numFmtId="164" formatCode="${symbol} #,##0.00"/>
+    <numFmt numFmtId="165" formatCode="${symbol} #,##0.0000"/>
     <numFmt numFmtId="166" formatCode="0.###"/>
   </numFmts>
   <fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts>
@@ -334,6 +336,7 @@ function createZip(files: { path: string; content: string | Uint8Array }[]) {
 }
 
 export function makeXlsxBlob(sheets: XlsxSheet[]) {
+  const currencySymbol = sheets.find((sheet) => sheet.currencySymbol)?.currencySymbol ?? "R";
   const files = [
     { path: "[Content_Types].xml", content: contentTypesXml(sheets) },
     { path: "_rels/.rels", content: rootRelsXml() },
@@ -341,7 +344,7 @@ export function makeXlsxBlob(sheets: XlsxSheet[]) {
     { path: "docProps/app.xml", content: appXml() },
     { path: "xl/workbook.xml", content: workbookXml(sheets) },
     { path: "xl/_rels/workbook.xml.rels", content: workbookRelsXml(sheets) },
-    { path: "xl/styles.xml", content: stylesXml() },
+    { path: "xl/styles.xml", content: stylesXml(currencySymbol) },
     ...sheets.map((sheet, index) => ({
       path: `xl/worksheets/sheet${index + 1}.xml`,
       content: sheetXml(sheet),

@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import "./globals.css";
 
-const title = "Recipe Cost Calculator";
+const title = "Production Controller";
 const description =
-  "A compact recipe formula, production batch, yield and costing application.";
+  "A compact recipe formula, production batch, yield and costing application with Supabase authentication.";
 
 function firstHeaderValue(value: string | null) {
   return value?.split(",")[0]?.trim();
@@ -40,7 +40,7 @@ export async function generateMetadata(): Promise<Metadata> {
           url: imageUrl,
           width: 1200,
           height: 630,
-          alt: "Recipe Cost Calculator formula and production costing interface",
+          alt: "Production Controller formula and production costing interface",
         },
       ],
     },

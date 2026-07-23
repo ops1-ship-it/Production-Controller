@@ -16,8 +16,12 @@ export type Database = {
       profiles: {
         Row: Row<{
           id: string;
+          first_name: string;
+          last_name: string;
           full_name: string | null;
-          email: string | null;
+          email: string;
+          contact_number: string;
+          country_calling_code: string | null;
           avatar_url: string | null;
           default_business_id: string | null;
           default_location_id: string | null;
@@ -33,10 +37,19 @@ export type Database = {
           id: string;
           name: string;
           business_code: string | null;
+          address_line_1: string | null;
+          address_line_2: string | null;
+          city: string | null;
+          province_region: string | null;
+          postal_code: string | null;
+          country_code: string;
           currency_code: string;
+          currency_symbol: string;
           vat_percentage: number;
           timezone: string;
           is_active: boolean;
+          created_by: string | null;
+          registration_idempotency_key: string | null;
           created_at: string;
           updated_at: string;
         }>;
@@ -51,6 +64,7 @@ export type Database = {
           role: string;
           is_active: boolean;
           created_at: string;
+          updated_at: string;
         }>;
         Insert: Insert<Database["public"]["Tables"]["business_users"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["business_users"]["Row"]>;

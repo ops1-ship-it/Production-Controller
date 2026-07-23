@@ -27,9 +27,9 @@ Useful commands:
 
 ## Supabase Backend
 
-The app uses Supabase for authentication, database storage, recipe data,
-ingredient data, production batches, costing records, yield records, image
-storage and audit history.
+The app uses Supabase for password authentication, email verification,
+password reset, database storage, recipe data, ingredient data, production
+batches, costing records, yield records, image storage and audit history.
 
 Create `.env.local` from `.env.example`:
 
@@ -52,19 +52,35 @@ Supabase setup files:
 
 ## Application Routes
 
-- `/dashboard`: operational summary.
+- `/`: public Production Controller home page with Login, Register and Forgot Password workflows.
+- `/dashboard`: protected operational summary.
 - `/ingredients`: Ingredients List with search, filters, inline costing, import/export templates, duplicate, and archive actions.
-- `/recipes`: saved recipe library with view, edit, duplicate, production, archive, and delete actions.
-- `/recipes/new`: create a recipe.
-- `/recipes/[recipeId]`: read-only recipe detail.
-- `/recipes/[recipeId]/edit`: edit the base formula, method, yield, and cost rules.
-- `/productions`: production landing page.
-- `/productions/new`: start a production from a saved recipe snapshot.
-- `/productions/in-progress`: manage active batches.
-- `/productions/completed`: read-only completed production history.
-- `/productions/[productionId]`: production detail and completion workflow.
-- `/reports`: yield, cost, and profitability summaries.
-- `/settings`: lookup values and costing policy notes.
+- `/recipes`: protected saved recipe library with view, edit, duplicate, production, archive, and delete actions.
+- `/recipes/new`: protected recipe creation.
+- `/recipes/[recipeId]`: protected read-only recipe detail.
+- `/recipes/[recipeId]/edit`: protected base formula, method, yield, and cost rules.
+- `/productions`: protected production landing page.
+- `/productions/new`: protected start-production workflow from a saved recipe snapshot.
+- `/productions/in-progress`: protected active batch management.
+- `/productions/completed`: protected read-only completed production history.
+- `/productions/[productionId]`: protected production detail and completion workflow.
+- `/reports`: protected yield, cost, and profitability summaries.
+- `/settings`: protected lookup values and costing policy notes.
+
+Unauthenticated users who open protected routes are redirected to `/` by the
+Supabase session middleware.
+
+## Registration and Business Setup
+
+Registration creates a Supabase Auth user and stores onboarding metadata for a
+database-side registration trigger. The trigger creates or repairs the user
+profile, first business, owner membership, default location and location
+membership in one controlled workflow. The registering user is assigned the
+`owner` role.
+
+Country and currency defaults live in `src/lib/business/countries.ts`. The
+selected business currency is used for ingredient, recipe, production, report
+and export currency formatting through `Intl.NumberFormat`.
 
 ## Source Control Policy
 

@@ -25,27 +25,24 @@ async function render(path = "/dashboard") {
   );
 }
 
-test("server-renders the routed recipe costing application", async () => {
-  const response = await render("/dashboard");
+test("server-renders the public home and authentication entry point", async () => {
+  const response = await render("/");
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Recipe Cost Calculator<\/title>/i);
-  assert.match(html, />Dashboard</);
-  assert.match(html, /Ingredients List/);
-  assert.match(html, />Recipes</);
-  assert.match(html, />Productions</);
-  assert.match(html, />Reports</);
-  assert.match(html, />Settings</);
-  assert.match(html, /Supabase backend/);
-  assert.match(html, /Connecting to Supabase/);
-  assert.match(html, /mobile-bottom-nav/);
+  assert.match(html, /<title>Production Controller<\/title>/i);
+  assert.match(html, /Production Controller/);
+  assert.match(html, /Login/);
+  assert.match(html, /Register/);
+  assert.match(html, /Email address/);
+  assert.match(html, /Password/);
+  assert.doesNotMatch(html, /mobile-bottom-nav/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
   assert.doesNotMatch(html, /Your site is taking shape|SkeletonPreview/i);
 });
 
-test("renders independent ingredient, recipe and production routes", async () => {
+test("redirects unauthenticated protected routes to the public home page", async () => {
   const [ingredientsResponse, recipesResponse, productionResponse] =
     await Promise.all([
       render("/ingredients"),
@@ -53,31 +50,30 @@ test("renders independent ingredient, recipe and production routes", async () =>
       render("/productions/new"),
     ]);
 
-  assert.equal(ingredientsResponse.status, 200);
-  assert.equal(recipesResponse.status, 200);
-  assert.equal(productionResponse.status, 200);
-
-  const [ingredientsHtml, recipesHtml, productionHtml] = await Promise.all([
-    ingredientsResponse.text(),
-    recipesResponse.text(),
-    productionResponse.text(),
-  ]);
-
-  assert.match(ingredientsHtml, /Ingredients List/);
-  assert.match(ingredientsHtml, /Supabase backend/);
-  assert.match(ingredientsHtml, /Connecting to Supabase/);
-
-  assert.match(recipesHtml, />Recipes</);
-  assert.match(recipesHtml, /Supabase backend/);
-  assert.match(recipesHtml, /Connecting to Supabase/);
-
-  assert.match(productionHtml, /New Production/);
-  assert.match(productionHtml, /Supabase backend/);
-  assert.match(productionHtml, /Connecting to Supabase/);
+  assert.equal(ingredientsResponse.status, 307);
+  assert.equal(recipesResponse.status, 307);
+  assert.equal(productionResponse.status, 307);
+  assert.match(ingredientsResponse.headers.get("location") ?? "", /\/\?next=%2Fingredients/);
+  assert.match(recipesResponse.headers.get("location") ?? "", /\/\?next=%2Frecipes/);
+  assert.match(
+    productionResponse.headers.get("location") ?? "",
+    /\/\?next=%2Fproductions%2Fnew/,
+  );
 });
 
 test("keeps starter preview code removed and includes Supabase setup", async () => {
-  const [page, layout, css, packageJson, envExample, migration, supabaseReadme] =
+  const [
+    page,
+    layout,
+    css,
+    packageJson,
+    envExample,
+    migration,
+    registrationMigration,
+    middleware,
+    countryConfig,
+    supabaseReadme,
+  ] =
     await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -91,6 +87,15 @@ test("keeps starter preview code removed and includes Supabase setup", async () 
       ),
       "utf8",
     ),
+    readFile(
+      new URL(
+        "../supabase/migrations/202607230003_home_auth_registration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(new URL("../src/lib/supabase/middleware.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/business/countries.ts", import.meta.url), "utf8"),
     readFile(new URL("../supabase/README.md", import.meta.url), "utf8"),
   ]);
 
@@ -100,7 +105,9 @@ test("keeps starter preview code removed and includes Supabase setup", async () 
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(page, /function convertQuantity/);
   assert.match(page, /createSupabaseBrowserClient/);
-  assert.match(page, /signInWithOtp/);
+  assert.match(page, /signInWithPassword/);
+  assert.match(page, /resetPasswordForEmail/);
+  assert.match(page, /registration_intent/);
   assert.match(page, /const deleteRecipe/);
   assert.match(page, /Ingredients List/);
   assert.match(page, /Export Current Ingredient List as XLSX/);
@@ -109,8 +116,11 @@ test("keeps starter preview code removed and includes Supabase setup", async () 
   assert.match(page, /Markup/);
   assert.match(page, /Gross Margin/);
   assert.match(layout, /generateMetadata/);
+  assert.match(layout, /Production Controller/);
   assert.match(layout, /og\.png/);
   assert.match(css, /grid-template-columns: minmax\(0, 1fr\) 188px/);
+  assert.match(css, /\.public-home-shell/);
+  assert.match(css, /\.auth-panel/);
   assert.match(css, /@media \(max-width: 820px\)/);
   assert.match(css, /\.ingredient-list-sheet/);
   assert.match(css, /\.import-preview-sheet/);
@@ -123,6 +133,13 @@ test("keeps starter preview code removed and includes Supabase setup", async () 
   assert.match(migration, /start_production_batch/);
   assert.match(migration, /complete_production_batch/);
   assert.match(migration, /storage\.buckets/);
+  assert.match(registrationMigration, /handle_new_user_registration/);
+  assert.match(registrationMigration, /business_users_set_updated_at/);
+  assert.match(registrationMigration, /registration_idempotency_key/);
+  assert.match(middleware, /protectedRoutePrefixes/);
+  assert.match(middleware, /NextResponse\.redirect/);
+  assert.match(countryConfig, /defaultCurrencyCode: "ZAR"/);
+  assert.match(countryConfig, /defaultCurrencyCode: "USD"/);
   assert.match(supabaseReadme, /Row Level Security/);
   assert.doesNotMatch(page + layout + css, /codex-preview|_sites-preview/);
 
@@ -143,6 +160,8 @@ test("keeps starter preview code removed and includes Supabase setup", async () 
     access(new URL("src/lib/supabase/database.types.ts", templateRoot)),
     access(new URL("src/lib/supabase/storage.ts", templateRoot)),
     access(new URL("src/lib/supabase/realtime.ts", templateRoot)),
+    access(new URL("src/lib/business/countries.ts", templateRoot)),
+    access(new URL("supabase/migrations/202607230003_home_auth_registration.sql", templateRoot)),
     access(new URL("supabase/test-checklist.md", templateRoot)),
   ]);
 

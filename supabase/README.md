@@ -25,6 +25,7 @@ migration creates:
 - recipes, recipe versions, formula lines and method steps
 - production batches, ingredient snapshots, method snapshots, costs, notes and images
 - audit logs
+- registration onboarding tables, triggers and owner setup workflow
 - standard units and production status seed records
 - private storage buckets and policies
 - database functions for access checks, batch numbers, start production and complete production
@@ -47,9 +48,11 @@ Initial roles:
 - `production_user`
 - `viewer`
 
-Owners and administrators should create businesses, locations and user access
-records as part of operational setup. The browser app does not bootstrap owner
-access on its own.
+Public registration sends onboarding metadata through Supabase Auth. The
+`handle_new_user_registration()` database trigger creates the profile, first
+business, default location, owner membership and location access in one
+controlled workflow. The browser app does not insert anonymous business records
+directly.
 
 ## Storage
 

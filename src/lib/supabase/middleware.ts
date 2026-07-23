@@ -3,6 +3,21 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseBrowserEnv } from "./env";
 import type { Database } from "./database.types";
 
+const protectedRoutePrefixes = [
+  "/dashboard",
+  "/ingredients",
+  "/recipes",
+  "/productions",
+  "/reports",
+  "/settings",
+];
+
+function isProtectedRoute(pathname: string) {
+  return protectedRoutePrefixes.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 export async function updateSupabaseSession(request: NextRequest) {
   const env = getSupabaseBrowserEnv();
   if (!env.isConfigured) {
@@ -26,6 +41,20 @@ export async function updateSupabaseSession(request: NextRequest) {
     },
   });
 
-  await supabase.auth.getClaims();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user && isProtectedRoute(request.nextUrl.pathname)) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/";
+    redirectUrl.search = "";
+    redirectUrl.searchParams.set(
+      "next",
+      `${request.nextUrl.pathname}${request.nextUrl.search}`,
+    );
+    return NextResponse.redirect(redirectUrl);
+  }
+
   return response;
 }

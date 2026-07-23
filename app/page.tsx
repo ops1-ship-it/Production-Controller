@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Unit =
   | "kg"
@@ -18,14 +18,19 @@ type Ingredient = {
   id: string;
   name: string;
   category: string;
+  description: string;
+  supplier: string;
+  sku: string;
   purchaseQuantity: number;
   purchaseUnit: Unit;
   purchaseCost: number;
   baseUnit: Unit;
-  supplier: string;
-  sku: string;
+  defaultWastage: number;
   notes: string;
   active: boolean;
+  lastCostUpdate: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type FormulaLine = {
@@ -37,6 +42,7 @@ type FormulaLine = {
   optional: boolean;
   wastage: number;
   notes: string;
+  sortOrder: number;
 };
 
 type MethodStep = {
@@ -60,24 +66,78 @@ type AdditionalCost = {
 };
 
 type Recipe = {
+  id: string;
   name: string;
   code: string;
   category: string;
   description: string;
+  version: string;
+  status: "Draft" | "Active" | "Archived";
+  baseStartingQuantity: number;
+  baseStartingUnit: Unit;
   expectedYield: number;
   yieldUnit: Unit;
-  pricingMethod: string;
-  profitPercentage: number;
-  status: string;
+  defaultAdditionalCost: number;
+  defaultSellingUnit: string;
+  pricingMethod: "Markup" | "Gross Margin";
+  pricingPercentage: number;
+  methodIntro: string;
   image: string;
-  version: string;
-};
-
-type SavedRecipe = Recipe & {
-  id: string;
   updatedAt: string;
   formulaLines: FormulaLine[];
   methodSteps: MethodStep[];
+};
+
+type ProductionLine = {
+  id: string;
+  ingredientId: string;
+  baseQuantity: number;
+  unit: Unit;
+  requiredQuantity: number;
+  actualQuantity: number;
+  actualUnit: Unit;
+  expectedCost: number;
+  actualCost: number;
+  costSnapshot: number;
+  notes: string;
+};
+
+type ProductionBatch = {
+  id: string;
+  batchNumber: string;
+  recipeId: string;
+  recipeName: string;
+  recipeVersion: string;
+  status:
+    | "Draft"
+    | "In Progress"
+    | "Resting"
+    | "Drying"
+    | "Awaiting Review"
+    | "On Hold"
+    | "Completed"
+    | "Cancelled";
+  mainQuantity: number;
+  mainUnit: Unit;
+  startDate: string;
+  endDate: string;
+  responsible: string;
+  location: string;
+  expectedCompletion: string;
+  notes: string;
+  outcomeNotes: string;
+  completedBy: string;
+  qualityRating: string;
+  startingYield: number;
+  completedYield: number;
+  yieldUnit: Unit;
+  methodSnapshot: MethodStep[];
+  formulaSnapshot: FormulaLine[];
+  lines: ProductionLine[];
+  additionalCosts: AdditionalCost[];
+  finalTotalCost?: number;
+  finalCostPerYield?: number;
+  finalSellingPrice?: number;
 };
 
 type Toast = {
@@ -85,7 +145,7 @@ type Toast = {
   message: string;
 };
 
-const savedRecipesStorageKey = "recipe-cost-calculator:saved-recipes";
+const storageKey = "recipe-cost-calculator:v2-application-data";
 
 const units: Unit[] = [
   "kg",
@@ -100,26 +160,14 @@ const units: Unit[] = [
   "custom",
 ];
 
-const statuses = [
-  "Draft",
-  "Scheduled",
-  "In Progress",
-  "Resting",
-  "Drying",
-  "Ready for Review",
-  "Completed",
-  "Failed",
-  "Cancelled",
-];
-
-const costTypes = [
+const additionalCostTypes = [
   "Labour",
   "Electricity",
   "Packaging",
   "Labels",
-  "Delivery",
-  "Equipment use",
   "Storage",
+  "Delivery",
+  "Equipment",
   "Other overhead",
 ];
 
@@ -131,83 +179,113 @@ const initialIngredients: Ingredient[] = [
     id: "silverside",
     name: "Silverside",
     category: "Meat",
-    purchaseQuantity: 5,
-    purchaseUnit: "kg",
-    purchaseCost: 645,
-    baseUnit: "kg",
+    description: "Trimmed beef cut used as the primary scaling ingredient.",
     supplier: "Karoo Butchery",
     sku: "MEAT-SILV-5KG",
-    notes: "Trimmed beef, chilled.",
+    purchaseQuantity: 1,
+    purchaseUnit: "kg",
+    purchaseCost: 132.5,
+    baseUnit: "g",
+    defaultWastage: 0,
+    notes: "Use chilled and trimmed.",
     active: true,
+    lastCostUpdate: "23 Jul 2026",
+    createdAt: "18 Jul 2026",
+    updatedAt: "23 Jul 2026",
   },
   {
     id: "coarse-salt",
     name: "Coarse Salt",
     category: "Seasoning",
+    description: "Food-grade coarse curing salt.",
+    supplier: "Cape Dry Goods",
+    sku: "DRY-SALT-10KG",
     purchaseQuantity: 10,
     purchaseUnit: "kg",
     purchaseCost: 122.5,
     baseUnit: "g",
-    supplier: "Cape Dry Goods",
-    sku: "DRY-SALT-10KG",
-    notes: "Food-grade coarse salt.",
+    defaultWastage: 0,
+    notes: "Store sealed.",
     active: true,
+    lastCostUpdate: "20 Jul 2026",
+    createdAt: "18 Jul 2026",
+    updatedAt: "20 Jul 2026",
   },
   {
     id: "coriander",
     name: "Whole Coriander",
     category: "Spice",
+    description: "Whole seed coriander for toasted spice blends.",
+    supplier: "Spice Route",
+    sku: "SPC-CORI-1KG",
     purchaseQuantity: 1,
     purchaseUnit: "kg",
     purchaseCost: 145,
     baseUnit: "g",
-    supplier: "Spice Route",
-    sku: "SPC-CORI-1KG",
+    defaultWastage: 2,
     notes: "Toast before cracking.",
     active: true,
+    lastCostUpdate: "20 Jul 2026",
+    createdAt: "18 Jul 2026",
+    updatedAt: "20 Jul 2026",
   },
   {
     id: "black-pepper",
     name: "Coarse Black Pepper",
     category: "Spice",
+    description: "Coarse milled pepper for curing mixes.",
+    supplier: "Spice Route",
+    sku: "SPC-PEPP-1KG",
     purchaseQuantity: 1,
     purchaseUnit: "kg",
     purchaseCost: 190,
     baseUnit: "g",
-    supplier: "Spice Route",
-    sku: "SPC-PEPP-1KG",
-    notes: "Coarse milled.",
+    defaultWastage: 0,
+    notes: "Use fresh stock.",
     active: true,
+    lastCostUpdate: "20 Jul 2026",
+    createdAt: "18 Jul 2026",
+    updatedAt: "20 Jul 2026",
   },
   {
     id: "vinegar",
     name: "Brown Vinegar",
     category: "Liquid",
+    description: "Brown vinegar used in marinades and curing dips.",
+    supplier: "Pantry Wholesale",
+    sku: "LIQ-VINE-5L",
     purchaseQuantity: 5,
     purchaseUnit: "L",
     purchaseCost: 88,
     baseUnit: "ml",
-    supplier: "Pantry Wholesale",
-    sku: "LIQ-VINE-5L",
+    defaultWastage: 0,
     notes: "Standard brown vinegar.",
     active: true,
+    lastCostUpdate: "21 Jul 2026",
+    createdAt: "18 Jul 2026",
+    updatedAt: "21 Jul 2026",
   },
   {
     id: "bicarb",
     name: "Bicarbonate of Soda",
     category: "Additive",
+    description: "Fine bicarbonate of soda powder.",
+    supplier: "Cape Dry Goods",
+    sku: "ADD-BIC-500G",
     purchaseQuantity: 500,
     purchaseUnit: "g",
     purchaseCost: 36,
     baseUnit: "g",
-    supplier: "Cape Dry Goods",
-    sku: "ADD-BIC-500G",
-    notes: "Fine powder.",
+    defaultWastage: 0,
+    notes: "Use sparingly.",
     active: true,
+    lastCostUpdate: "19 Jul 2026",
+    createdAt: "18 Jul 2026",
+    updatedAt: "19 Jul 2026",
   },
 ];
 
-const initialFormulaLines: FormulaLine[] = [
+const baseFormula: FormulaLine[] = [
   {
     id: "line-silverside",
     ingredientId: "silverside",
@@ -217,6 +295,7 @@ const initialFormulaLines: FormulaLine[] = [
     optional: false,
     wastage: 0,
     notes: "Scaling ingredient",
+    sortOrder: 1,
   },
   {
     id: "line-salt",
@@ -227,6 +306,7 @@ const initialFormulaLines: FormulaLine[] = [
     optional: false,
     wastage: 0,
     notes: "",
+    sortOrder: 2,
   },
   {
     id: "line-coriander",
@@ -237,6 +317,7 @@ const initialFormulaLines: FormulaLine[] = [
     optional: false,
     wastage: 2,
     notes: "Cracked",
+    sortOrder: 3,
   },
   {
     id: "line-pepper",
@@ -247,6 +328,7 @@ const initialFormulaLines: FormulaLine[] = [
     optional: false,
     wastage: 0,
     notes: "",
+    sortOrder: 4,
   },
   {
     id: "line-vinegar",
@@ -257,6 +339,7 @@ const initialFormulaLines: FormulaLine[] = [
     optional: false,
     wastage: 0,
     notes: "",
+    sortOrder: 5,
   },
   {
     id: "line-bicarb",
@@ -267,10 +350,11 @@ const initialFormulaLines: FormulaLine[] = [
     optional: false,
     wastage: 0,
     notes: "",
+    sortOrder: 6,
   },
 ];
 
-const initialMethodSteps: MethodStep[] = [
+const baseMethod: MethodStep[] = [
   {
     id: "step-1",
     title: "Trim and weigh",
@@ -306,91 +390,63 @@ const initialMethodSteps: MethodStep[] = [
   },
 ];
 
-const initialRecipe: Recipe = {
-  name: "Peppered Silverside",
-  code: "BEEF-SILV-001",
-  category: "Cured Meat",
-  description: "Scalable base formula for peppered silverside batches.",
-  expectedYield: 0.9,
-  yieldUnit: "kg",
-  pricingMethod: "Gross Margin",
-  profitPercentage: 42,
-  status: "Active",
-  image: "",
-  version: "1.0",
-};
-
-const initialSavedRecipes: SavedRecipe[] = [
+const initialRecipes: Recipe[] = [
   {
-    ...initialRecipe,
     id: "recipe-silverside",
+    name: "Traditional Silverside Biltong",
+    code: "BEEF-SILV-001",
+    category: "Cured Meat",
+    description: "A base biltong-style formula with immediate batch scaling.",
+    version: "1.0",
+    status: "Active",
+    baseStartingQuantity: 1,
+    baseStartingUnit: "kg",
+    expectedYield: 0.9,
+    yieldUnit: "kg",
+    defaultAdditionalCost: 24,
+    defaultSellingUnit: "Per kg",
+    pricingMethod: "Gross Margin",
+    pricingPercentage: 42,
+    methodIntro: "Keep the meat chilled and record all trim and yield changes.",
+    image: "",
     updatedAt: "23 Jul 2026, 09:42",
-    formulaLines: initialFormulaLines,
-    methodSteps: initialMethodSteps,
+    formulaLines: baseFormula,
+    methodSteps: baseMethod,
   },
   {
     id: "recipe-biltong",
     name: "Coriander Biltong Slab",
     code: "BEEF-BILT-002",
     category: "Dried Meat",
-    description: "Leaner biltong formula with heavier coriander and drying loss.",
+    description: "Leaner slabs with heavier coriander and a longer dry stage.",
+    version: "1.2",
+    status: "Active",
+    baseStartingQuantity: 1,
+    baseStartingUnit: "kg",
     expectedYield: 0.62,
     yieldUnit: "kg",
+    defaultAdditionalCost: 32,
+    defaultSellingUnit: "Per 100 g",
     pricingMethod: "Gross Margin",
-    profitPercentage: 48,
-    status: "Active",
+    pricingPercentage: 48,
+    methodIntro: "Cut even slabs and dry until the target moisture loss is reached.",
     image: "",
-    version: "1.2",
     updatedAt: "22 Jul 2026, 15:18",
     formulaLines: [
+      { ...baseFormula[0], id: "biltong-silverside", notes: "Trim lean" },
+      { ...baseFormula[1], id: "biltong-salt", quantity: 24 },
       {
-        id: "biltong-silverside",
-        ingredientId: "silverside",
-        quantity: 1,
-        unit: "kg",
-        isMain: true,
-        optional: false,
-        wastage: 0,
-        notes: "Trim lean",
-      },
-      {
-        id: "biltong-salt",
-        ingredientId: "coarse-salt",
-        quantity: 24,
-        unit: "g",
-        isMain: false,
-        optional: false,
-        wastage: 0,
-        notes: "",
-      },
-      {
+        ...baseFormula[2],
         id: "biltong-coriander",
-        ingredientId: "coriander",
         quantity: 18,
-        unit: "g",
-        isMain: false,
-        optional: false,
         wastage: 3,
         notes: "Toasted and cracked",
       },
+      { ...baseFormula[3], id: "biltong-pepper", quantity: 5 },
       {
-        id: "biltong-pepper",
-        ingredientId: "black-pepper",
-        quantity: 5,
-        unit: "g",
-        isMain: false,
-        optional: false,
-        wastage: 0,
-        notes: "",
-      },
-      {
+        ...baseFormula[4],
         id: "biltong-vinegar",
-        ingredientId: "vinegar",
         quantity: 120,
-        unit: "ml",
-        isMain: false,
-        optional: false,
-        wastage: 0,
         notes: "Dip before curing",
       },
     ],
@@ -432,65 +488,38 @@ const initialSavedRecipes: SavedRecipe[] = [
     name: "Vinegar Beef Jerky",
     code: "BEEF-JERK-003",
     category: "Snack",
-    description: "Thin-cut jerky batch with higher vinegar marinade ratio.",
+    description: "Thin-cut jerky batch with a higher vinegar marinade ratio.",
+    version: "0.8",
+    status: "Draft",
+    baseStartingQuantity: 1,
+    baseStartingUnit: "kg",
     expectedYield: 0.52,
     yieldUnit: "kg",
+    defaultAdditionalCost: 28,
+    defaultSellingUnit: "Per packet",
     pricingMethod: "Markup",
-    profitPercentage: 75,
-    status: "Draft",
+    pricingPercentage: 75,
+    methodIntro: "Slice evenly and marinate before drying.",
     image: "",
-    version: "0.8",
     updatedAt: "21 Jul 2026, 11:05",
     formulaLines: [
+      { ...baseFormula[0], id: "jerky-silverside", notes: "Slice thin" },
       {
-        id: "jerky-silverside",
-        ingredientId: "silverside",
-        quantity: 1,
-        unit: "kg",
-        isMain: true,
-        optional: false,
-        wastage: 0,
-        notes: "Slice thin",
-      },
-      {
+        ...baseFormula[4],
         id: "jerky-vinegar",
-        ingredientId: "vinegar",
         quantity: 220,
-        unit: "ml",
-        isMain: false,
-        optional: false,
-        wastage: 0,
+        sortOrder: 2,
         notes: "Marinade",
       },
+      { ...baseFormula[1], id: "jerky-salt", quantity: 18, sortOrder: 3 },
+      { ...baseFormula[3], id: "jerky-pepper", quantity: 8, sortOrder: 4 },
       {
-        id: "jerky-salt",
-        ingredientId: "coarse-salt",
-        quantity: 18,
-        unit: "g",
-        isMain: false,
-        optional: false,
-        wastage: 0,
-        notes: "",
-      },
-      {
-        id: "jerky-pepper",
-        ingredientId: "black-pepper",
-        quantity: 8,
-        unit: "g",
-        isMain: false,
-        optional: false,
-        wastage: 0,
-        notes: "",
-      },
-      {
+        ...baseFormula[2],
         id: "jerky-coriander",
-        ingredientId: "coriander",
         quantity: 6,
-        unit: "g",
-        isMain: false,
         optional: true,
-        wastage: 0,
-        notes: "Optional batch note",
+        sortOrder: 5,
+        notes: "Optional",
       },
     ],
     methodSteps: [
@@ -540,84 +569,151 @@ function convertQuantity(quantity: number, from: Unit, to: Unit) {
   return quantity;
 }
 
-function ingredientBaseCost(ingredient: Ingredient) {
+function ingredientUnitCost(ingredient: Ingredient) {
   const convertedPurchaseQuantity = convertQuantity(
     ingredient.purchaseQuantity,
     ingredient.purchaseUnit,
     ingredient.baseUnit,
   );
-
-  if (convertedPurchaseQuantity <= 0) return 0;
-  return ingredient.purchaseCost / convertedPurchaseQuantity;
+  return convertedPurchaseQuantity > 0
+    ? ingredient.purchaseCost / convertedPurchaseQuantity
+    : 0;
 }
 
-function cloneFormulaLines(lines: FormulaLine[]) {
-  return lines.map((line) => ({ ...line }));
-}
-
-function cloneMethodSteps(steps: MethodStep[]) {
-  return steps.map((step) => ({ ...step }));
-}
-
-function formulaCostForLines(
-  lines: FormulaLine[],
+function formulaLineCost(
+  line: FormulaLine,
   ingredientMap: Map<string, Ingredient>,
 ) {
-  return lines.reduce((sum, line) => {
-    const ingredient = ingredientMap.get(line.ingredientId);
-    if (!ingredient) return sum;
-    const convertedQuantity = convertQuantity(
-      line.quantity,
-      line.unit,
-      ingredient.baseUnit,
-    );
-    return (
-      sum +
-      convertedQuantity * ingredientBaseCost(ingredient) * (1 + line.wastage / 100)
-    );
-  }, 0);
+  const ingredient = ingredientMap.get(line.ingredientId);
+  if (!ingredient) return 0;
+  const quantityInBaseUnit = convertQuantity(
+    line.quantity,
+    line.unit,
+    ingredient.baseUnit,
+  );
+  return quantityInBaseUnit * ingredientUnitCost(ingredient) * (1 + line.wastage / 100);
 }
 
-function recipeMainIngredientName(
-  lines: FormulaLine[],
-  ingredientMap: Map<string, Ingredient>,
-) {
-  const mainLine = lines.find((line) => line.isMain) ?? lines[0];
+function recipeMainLine(recipe: Recipe) {
+  return (
+    recipe.formulaLines.find((line) => line.isMain) ?? recipe.formulaLines[0]
+  );
+}
+
+function recipeMainIngredient(recipe: Recipe, ingredientMap: Map<string, Ingredient>) {
+  const mainLine = recipeMainLine(recipe);
   return mainLine
     ? (ingredientMap.get(mainLine.ingredientId)?.name ?? "Unassigned")
     : "Unassigned";
 }
 
-function recipeFieldsFromSaved(savedRecipe: SavedRecipe): Recipe {
-  const { id, updatedAt, formulaLines, methodSteps, ...recipeFields } =
-    savedRecipe;
-  void id;
-  void updatedAt;
-  void formulaLines;
-  void methodSteps;
-  return recipeFields;
+function recipeFormulaCost(recipe: Recipe, ingredientMap: Map<string, Ingredient>) {
+  return recipe.formulaLines.reduce(
+    (sum, line) => sum + formulaLineCost(line, ingredientMap),
+    0,
+  );
 }
 
 function formatNumber(value: number, digits = 2) {
-  if (!Number.isFinite(value)) return "0";
   return new Intl.NumberFormat("en-ZA", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
-  }).format(value);
+  }).format(Number.isFinite(value) ? value : 0);
 }
 
-function formatCurrency(value: number) {
-  if (!Number.isFinite(value)) value = 0;
+function formatCurrency(value: number, digits = 2) {
   return new Intl.NumberFormat("en-ZA", {
     style: "currency",
     currency: "ZAR",
-    minimumFractionDigits: 2,
-  }).format(value);
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(Number.isFinite(value) ? value : 0);
 }
 
 function toNumber(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function sellingUnitQuantity(unit: string) {
+  if (unit === "Per kg") return 1;
+  if (unit === "Per 500 g") return 0.5;
+  if (unit === "Per 250 g") return 0.25;
+  if (unit === "Per 100 g") return 0.1;
+  if (unit === "Per packet") return 0.25;
+  if (unit === "Per portion") return 0.125;
+  if (unit === "Per item") return 0.1;
+  return 1;
+}
+
+function sellingPrice(cost: number, method: Recipe["pricingMethod"], percentage: number) {
+  if (method === "Markup") return cost * (1 + percentage / 100);
+  return percentage >= 100 ? 0 : cost / (1 - percentage / 100);
+}
+
+function todayStamp() {
+  return new Intl.DateTimeFormat("en-ZA", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+function cloneFormula(lines: FormulaLine[]) {
+  return lines.map((line) => ({ ...line }));
+}
+
+function cloneMethod(steps: MethodStep[]) {
+  return steps.map((step) => ({ ...step }));
+}
+
+function productionLinesForRecipe(
+  recipe: Recipe,
+  mainQuantity: number,
+  mainUnit: Unit,
+  ingredientMap: Map<string, Ingredient>,
+) {
+  const mainLine = recipeMainLine(recipe);
+  const mainQuantityInBaseUnit = mainLine
+    ? convertQuantity(mainQuantity, mainUnit, mainLine.unit)
+    : mainQuantity;
+  const scalingFactor =
+    mainLine && mainLine.quantity > 0 ? mainQuantityInBaseUnit / mainLine.quantity : 1;
+
+  return recipe.formulaLines.map((line) => {
+    const ingredient = ingredientMap.get(line.ingredientId);
+    const requiredQuantity = line.quantity * scalingFactor;
+    const costSnapshot = ingredient ? ingredientUnitCost(ingredient) : 0;
+    const expectedQuantityInBaseUnit = ingredient
+      ? convertQuantity(requiredQuantity, line.unit, ingredient.baseUnit)
+      : requiredQuantity;
+    const expectedCost = expectedQuantityInBaseUnit * costSnapshot;
+
+    return {
+      id: makeId("prod-line"),
+      ingredientId: line.ingredientId,
+      baseQuantity: line.quantity,
+      unit: line.unit,
+      requiredQuantity,
+      actualQuantity: requiredQuantity,
+      actualUnit: line.unit,
+      expectedCost,
+      actualCost: expectedCost,
+      costSnapshot,
+      notes: "",
+    };
+  });
+}
+
+function fieldLabel(label: string, required?: boolean) {
+  return (
+    <span>
+      {label}
+      {required ? <b aria-label="required">*</b> : null}
+    </span>
+  );
 }
 
 function Field({
@@ -631,10 +727,7 @@ function Field({
 }) {
   return (
     <label className="field">
-      <span>
-        {label}
-        {required ? <b aria-label="required">*</b> : null}
-      </span>
+      {fieldLabel(label, required)}
       {children}
     </label>
   );
@@ -644,14 +737,17 @@ function UnitSelect({
   value,
   onChange,
   label,
+  disabled = false,
 }: {
   value: Unit;
   onChange: (value: Unit) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <select
       aria-label={label}
+      disabled={disabled}
       value={value}
       onChange={(event) => onChange(event.target.value as Unit)}
     >
@@ -669,15 +765,18 @@ function NumberInput({
   onChange,
   label,
   step = "0.01",
+  disabled = false,
 }: {
   value: number;
   onChange: (value: number) => void;
   label: string;
   step?: string;
+  disabled?: boolean;
 }) {
   return (
     <input
       aria-label={label}
+      disabled={disabled}
       type="number"
       min="0"
       step={step}
@@ -687,113 +786,114 @@ function NumberInput({
   );
 }
 
-export default function Home() {
-  const [ingredients, setIngredients] = useState(initialIngredients);
-  const [formulaLines, setFormulaLines] = useState(initialFormulaLines);
-  const [methodSteps, setMethodSteps] = useState(initialMethodSteps);
-  const [savedRecipes, setSavedRecipes] = useState(initialSavedRecipes);
-  const [activeRecipeId, setActiveRecipeId] = useState<string | null>(
-    "recipe-silverside",
-  );
-  const [recipesLoaded, setRecipesLoaded] = useState(false);
-  const [draggingStepId, setDraggingStepId] = useState<string | null>(null);
-  const [toast, setToast] = useState<Toast | null>(null);
-  const [savingRecipe, setSavingRecipe] = useState(false);
-  const [savingBatch, setSavingBatch] = useState(false);
+type AppData = {
+  ingredients: Ingredient[];
+  recipes: Recipe[];
+  productions: ProductionBatch[];
+};
 
-  const [recipe, setRecipe] = useState<Recipe>(initialRecipe);
-
-  const [production, setProduction] = useState({
-    batchNumber: "PB-2026-0001",
-    business: "Central Kitchen",
-    location: "Cape Town",
-    productionArea: "Curing room",
-    responsible: "A. Carstens",
-    status: "In Progress",
-    start: "2026-07-23T08:00",
-    end: "2026-07-24T08:00",
-    mainQuantity: 1.5,
-    mainUnit: "kg" as Unit,
-    startingYield: 1.5,
-    startingYieldUnit: "kg" as Unit,
-    endYield: 0.9,
-    endYieldUnit: "kg" as Unit,
-    preNotes: "Silverside trimmed and weighed before curing.",
-    duringNotes: "Cure mix applied evenly.",
-    outcomeNotes: "Review after resting.",
-    qualityRating: "4",
-    photos: "",
-    completedBy: "",
-    approvedBy: "",
-  });
-
-  const [usageOverrides, setUsageOverrides] = useState<
-    Record<string, { quantity?: number; unit?: Unit; notes?: string }>
-  >({});
-
-  const [additionalCosts, setAdditionalCosts] = useState<AdditionalCost[]>([
+const completedDemoProduction: ProductionBatch = {
+  id: "production-completed-001",
+  batchNumber: "PB-2026-0000",
+  recipeId: "recipe-silverside",
+  recipeName: "Traditional Silverside Biltong",
+  recipeVersion: "1.0",
+  status: "Completed",
+  mainQuantity: 1.5,
+  mainUnit: "kg",
+  startDate: "2026-07-20T08:00",
+  endDate: "2026-07-22T11:00",
+  responsible: "A. Carstens",
+  location: "Cape Town",
+  expectedCompletion: "2026-07-22T08:00",
+  notes: "Completed with normal drying loss.",
+  outcomeNotes: "Good texture and even cure.",
+  completedBy: "A. Carstens",
+  qualityRating: "4",
+  startingYield: 1.5,
+  completedYield: 0.9,
+  yieldUnit: "kg",
+  methodSnapshot: cloneMethod(baseMethod),
+  formulaSnapshot: cloneFormula(baseFormula),
+  lines: [],
+  additionalCosts: [
     {
-      id: "cost-labour",
+      id: "completed-cost-labour",
       type: "Labour",
-      description: "Prep and packing time",
+      description: "Preparation and packing",
       quantity: 1.5,
       rate: 85,
       notes: "",
     },
-    {
-      id: "cost-packaging",
-      type: "Packaging",
-      description: "Vacuum bag and label",
-      quantity: 3,
-      rate: 4.5,
-      notes: "Per packed unit",
-    },
-  ]);
+  ],
+  finalTotalCost: 250,
+  finalCostPerYield: 277.78,
+  finalSellingPrice: 478.93,
+};
 
-  const [pricing, setPricing] = useState({
-    method: "Gross Margin",
-    percentage: 42,
-    sellingUnit: "Per kg",
-    customQuantity: 500,
-    customUnit: "g" as Unit,
+const initialData: AppData = {
+  ingredients: initialIngredients,
+  recipes: initialRecipes,
+  productions: [completedDemoProduction],
+};
+
+export default function RecipeCostApp({
+  initialPath = "/dashboard",
+}: {
+  initialPath?: string;
+}) {
+  const [route, setRoute] = useState(initialPath);
+  const [ingredients, setIngredients] = useState(initialData.ingredients);
+  const [recipes, setRecipes] = useState(initialData.recipes);
+  const [productions, setProductions] = useState(initialData.productions);
+  const [activeRecipeId, setActiveRecipeId] = useState("recipe-silverside");
+  const [ingredientSearch, setIngredientSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [supplierFilter, setSupplierFilter] = useState("All");
+  const [activeFilter, setActiveFilter] = useState("All");
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [savingRecipe, setSavingRecipe] = useState(false);
+  const [startingProduction, setStartingProduction] = useState(false);
+  const [productionDraft, setProductionDraft] = useState({
+    recipeId: "recipe-silverside",
+    mainQuantity: 1.5,
+    mainUnit: "kg" as Unit,
+    startDate: "2026-07-23T08:00",
+    responsible: "A. Carstens",
+    location: "Cape Town",
+    notes: "",
   });
 
   useEffect(() => {
+    const readRoute = () =>
+      setRoute(`${window.location.pathname}${window.location.search}`);
+    readRoute();
+    window.addEventListener("popstate", readRoute);
+    return () => window.removeEventListener("popstate", readRoute);
+  }, []);
+
+  useEffect(() => {
     try {
-      const storedRecipes = window.localStorage.getItem(savedRecipesStorageKey);
-      if (storedRecipes) {
-        const parsedRecipes = JSON.parse(storedRecipes);
-        if (
-          Array.isArray(parsedRecipes) &&
-          parsedRecipes.length > 0 &&
-          parsedRecipes[0].formulaLines
-        ) {
-          const restoredRecipes = parsedRecipes as SavedRecipe[];
-          const restoredRecipe = restoredRecipes[0];
-          setSavedRecipes(restoredRecipes);
-          setActiveRecipeId(restoredRecipe.id);
-          setRecipe(recipeFieldsFromSaved(restoredRecipe));
-          setFormulaLines(cloneFormulaLines(restoredRecipe.formulaLines));
-          setMethodSteps(cloneMethodSteps(restoredRecipe.methodSteps ?? []));
-        }
-      }
+      const stored = window.localStorage.getItem(storageKey);
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as Partial<AppData>;
+      if (parsed.ingredients?.length) setIngredients(parsed.ingredients);
+      if (parsed.recipes?.length) setRecipes(parsed.recipes);
+      if (parsed.productions?.length) setProductions(parsed.productions);
     } catch {
       setToast({
         kind: "warning",
-        message: "Saved recipes could not be loaded on this device.",
+        message: "Saved local application data could not be loaded.",
       });
-    } finally {
-      setRecipesLoaded(true);
     }
   }, []);
 
   useEffect(() => {
-    if (!recipesLoaded) return;
     window.localStorage.setItem(
-      savedRecipesStorageKey,
-      JSON.stringify(savedRecipes),
+      storageKey,
+      JSON.stringify({ ingredients, recipes, productions }),
     );
-  }, [recipesLoaded, savedRecipes]);
+  }, [ingredients, productions, recipes]);
 
   useEffect(() => {
     if (!toast) return;
@@ -804,450 +904,530 @@ export default function Home() {
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
+  const pathname = route.split("?")[0] || "/dashboard";
+  const query = useMemo(
+    () => new URLSearchParams(route.split("?")[1] ?? ""),
+    [route],
+  );
   const ingredientMap = useMemo(
     () => new Map(ingredients.map((ingredient) => [ingredient.id, ingredient])),
     [ingredients],
   );
+  const activeRecipe =
+    recipes.find((recipe) => recipe.id === activeRecipeId) ?? recipes[0];
+  const selectedProductionRecipe =
+    recipes.find((recipe) => recipe.id === productionDraft.recipeId) ??
+    activeRecipe;
 
-  const savedRecipeRows = useMemo(
+  const recipeRows = useMemo(
     () =>
-      savedRecipes.map((savedRecipe) => ({
-        ...savedRecipe,
-        lineCount: savedRecipe.formulaLines.length,
-        methodStepCount: savedRecipe.methodSteps.length,
-        mainIngredientName: recipeMainIngredientName(
-          savedRecipe.formulaLines,
-          ingredientMap,
-        ),
-        formulaCost: formulaCostForLines(savedRecipe.formulaLines, ingredientMap),
-      })),
-    [ingredientMap, savedRecipes],
-  );
-
-  const mainLine = useMemo(
-    () => formulaLines.find((line) => line.isMain) ?? formulaLines[0],
-    [formulaLines],
-  );
-
-  const mainIngredient = mainLine
-    ? ingredientMap.get(mainLine.ingredientId)
-    : undefined;
-
-  const scalingFactor = useMemo(() => {
-    if (!mainLine || mainLine.quantity <= 0) return 1;
-    const productionMain = convertQuantity(
-      production.mainQuantity,
-      production.mainUnit,
-      mainLine.unit,
-    );
-    return productionMain / mainLine.quantity;
-  }, [mainLine, production.mainQuantity, production.mainUnit]);
-
-  const formulaRows = useMemo(
-    () =>
-      formulaLines.map((line, index) => {
-        const ingredient = ingredientMap.get(line.ingredientId);
-        const baseCost = ingredient ? ingredientBaseCost(ingredient) : 0;
-        const convertedQuantity = ingredient
-          ? convertQuantity(line.quantity, line.unit, ingredient.baseUnit)
-          : 0;
-        const lineCost = convertedQuantity * baseCost * (1 + line.wastage / 100);
-
+      recipes.map((recipe) => {
+        const formulaCost = recipeFormulaCost(recipe, ingredientMap);
+        const expectedTotal = formulaCost + recipe.defaultAdditionalCost;
+        const costPerYield =
+          recipe.expectedYield > 0 ? expectedTotal / recipe.expectedYield : 0;
         return {
-          ...line,
-          index,
-          ingredient,
-          baseCost,
-          lineCost,
+          ...recipe,
+          mainIngredient: recipeMainIngredient(recipe, ingredientMap),
+          formulaCost,
+          expectedTotal,
+          costPerYield,
         };
       }),
-    [formulaLines, ingredientMap],
+    [ingredientMap, recipes],
   );
 
-  const totalFormulaCost = useMemo(
-    () => formulaRows.reduce((sum, row) => sum + row.lineCost, 0),
-    [formulaRows],
-  );
-
-  const productionRows = useMemo(
+  const filteredIngredients = useMemo(
     () =>
-      formulaRows.map((row) => {
-        const requiredQuantity = row.quantity * scalingFactor;
-        const override = usageOverrides[row.id];
-        const actualQuantity = override?.quantity ?? requiredQuantity;
-        const actualUnit = override?.unit ?? row.unit;
-        const expectedCost = row.lineCost * scalingFactor;
-        const actualConverted = row.ingredient
-          ? convertQuantity(actualQuantity, actualUnit, row.ingredient.baseUnit)
-          : 0;
-        const actualCost = actualConverted * row.baseCost;
-        const variance =
-          convertQuantity(actualQuantity, actualUnit, row.unit) - requiredQuantity;
-
-        return {
-          ...row,
-          requiredQuantity,
-          actualQuantity,
-          actualUnit,
-          variance,
-          expectedCost,
-          actualCost,
-          costVariance: actualCost - expectedCost,
-          usageNotes: override?.notes ?? "",
-        };
+      ingredients.filter((ingredient) => {
+        const matchesSearch =
+          ingredient.name.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
+          ingredient.sku.toLowerCase().includes(ingredientSearch.toLowerCase());
+        const matchesCategory =
+          categoryFilter === "All" || ingredient.category === categoryFilter;
+        const matchesSupplier =
+          supplierFilter === "All" || ingredient.supplier === supplierFilter;
+        const matchesActive =
+          activeFilter === "All" ||
+          (activeFilter === "Active" ? ingredient.active : !ingredient.active);
+        return matchesSearch && matchesCategory && matchesSupplier && matchesActive;
       }),
-    [formulaRows, scalingFactor, usageOverrides],
+    [activeFilter, categoryFilter, ingredientSearch, ingredients, supplierFilter],
   );
 
-  const expectedIngredientCost = productionRows.reduce(
-    (sum, row) => sum + row.expectedCost,
-    0,
+  const productionDraftLines = useMemo(
+    () =>
+      productionLinesForRecipe(
+        selectedProductionRecipe,
+        productionDraft.mainQuantity,
+        productionDraft.mainUnit,
+        ingredientMap,
+      ),
+    [
+      ingredientMap,
+      productionDraft.mainQuantity,
+      productionDraft.mainUnit,
+      selectedProductionRecipe,
+    ],
   );
-  const actualIngredientCost = productionRows.reduce(
-    (sum, row) => sum + row.actualCost,
-    0,
-  );
-  const additionalCostTotal = additionalCosts.reduce(
-    (sum, row) => sum + row.quantity * row.rate,
-    0,
-  );
-  const totalProductionCost = actualIngredientCost + additionalCostTotal;
 
-  const startingYieldInEndUnit = convertQuantity(
-    production.startingYield,
-    production.startingYieldUnit,
-    production.endYieldUnit,
+  const activeProductions = productions.filter((production) =>
+    ["In Progress", "Resting", "Drying", "Awaiting Review", "On Hold"].includes(
+      production.status,
+    ),
   );
-  const yieldPercentage =
-    startingYieldInEndUnit > 0
-      ? (production.endYield / startingYieldInEndUnit) * 100
-      : 0;
-  const productionLoss = Math.max(startingYieldInEndUnit - production.endYield, 0);
-  const lossPercentage =
-    startingYieldInEndUnit > 0 ? (productionLoss / startingYieldInEndUnit) * 100 : 0;
-
-  const endYieldKg = convertQuantity(
-    production.endYield,
-    production.endYieldUnit,
-    "kg",
+  const completedProductions = productions.filter(
+    (production) => production.status === "Completed",
   );
-  const costPerKg = endYieldKg > 0 ? totalProductionCost / endYieldKg : 0;
 
-  const sellingUnitKg = useMemo(() => {
-    if (pricing.sellingUnit === "Per kg") return 1;
-    if (pricing.sellingUnit === "Per 500 g") return 0.5;
-    if (pricing.sellingUnit === "Per 250 g") return 0.25;
-    if (pricing.sellingUnit === "Per 100 g") return 0.1;
-    if (pricing.sellingUnit === "Per portion") return 0.125;
-    if (pricing.sellingUnit === "Per packet") return 0.25;
-    if (pricing.sellingUnit === "Per item") return 0.1;
-    return convertQuantity(pricing.customQuantity, pricing.customUnit, "kg");
-  }, [pricing.customQuantity, pricing.customUnit, pricing.sellingUnit]);
-
-  const sellingUnitCost = costPerKg * sellingUnitKg;
-  const sellingPrice =
-    pricing.method === "Markup"
-      ? sellingUnitCost * (1 + pricing.percentage / 100)
-      : pricing.percentage >= 100
-        ? 0
-        : sellingUnitCost / (1 - pricing.percentage / 100);
-  const unitProfit = sellingPrice - sellingUnitCost;
-  const effectiveMargin =
-    sellingPrice > 0 ? ((sellingPrice - sellingUnitCost) / sellingPrice) * 100 : 0;
+  const navigate = (href: string) => {
+    window.history.pushState(null, "", href);
+    setRoute(`${window.location.pathname}${window.location.search}`);
+  };
 
   const showToast = (kind: Toast["kind"], message: string) => {
     setToast({ kind, message });
   };
 
-  const updateIngredient = <K extends keyof Ingredient>(
-    id: string,
-    key: K,
-    value: Ingredient[K],
-  ) => {
+  const updateIngredient = (id: string, patch: Partial<Ingredient>) => {
     setIngredients((current) =>
       current.map((ingredient) =>
-        ingredient.id === id ? { ...ingredient, [key]: value } : ingredient,
+        ingredient.id === id
+          ? { ...ingredient, ...patch, updatedAt: "23 Jul 2026" }
+          : ingredient,
       ),
     );
   };
 
-  const updateFormulaLine = <K extends keyof FormulaLine>(
-    id: string,
-    key: K,
-    value: FormulaLine[K],
-  ) => {
-    setFormulaLines((current) =>
-      current.map((line) => (line.id === id ? { ...line, [key]: value } : line)),
-    );
-  };
-
-  const setMainFormulaLine = (id: string) => {
-    setFormulaLines((current) =>
-      current.map((line) => ({ ...line, isMain: line.id === id })),
-    );
-  };
-
-  const updateUsage = (
-    id: string,
-    patch: Partial<{ quantity: number; unit: Unit; notes: string }>,
-  ) => {
-    setUsageOverrides((current) => ({
-      ...current,
-      [id]: { ...(current[id] ?? {}), ...patch },
-    }));
-  };
-
-  const loadSavedRecipe = (savedRecipe: SavedRecipe) => {
-    setActiveRecipeId(savedRecipe.id);
-    setRecipe(recipeFieldsFromSaved(savedRecipe));
-    setFormulaLines(cloneFormulaLines(savedRecipe.formulaLines));
-    setMethodSteps(cloneMethodSteps(savedRecipe.methodSteps));
-    setUsageOverrides({});
-    setPricing((current) => ({
-      ...current,
-      method: savedRecipe.pricingMethod,
-      percentage: savedRecipe.profitPercentage,
-    }));
-    showToast("success", `${savedRecipe.name} loaded for editing.`);
-  };
-
-  const saveCurrentRecipe = () => {
-    const savedId = activeRecipeId ?? makeId("recipe");
-    const updatedAt = new Intl.DateTimeFormat("en-ZA", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date());
-    const savedRecipe: SavedRecipe = {
-      ...recipe,
-      id: savedId,
-      updatedAt,
-      formulaLines: cloneFormulaLines(formulaLines),
-      methodSteps: cloneMethodSteps(methodSteps),
+  const createIngredient = () => {
+    const ingredient: Ingredient = {
+      id: makeId("ingredient"),
+      name: "New Ingredient",
+      category: "Uncategorised",
+      description: "",
+      supplier: "",
+      sku: "",
+      purchaseQuantity: 1,
+      purchaseUnit: "kg",
+      purchaseCost: 0,
+      baseUnit: "kg",
+      defaultWastage: 0,
+      notes: "",
+      active: true,
+      lastCostUpdate: "23 Jul 2026",
+      createdAt: "23 Jul 2026",
+      updatedAt: "23 Jul 2026",
     };
-
-    setSavedRecipes((current) => {
-      const exists = current.some((item) => item.id === savedId);
-      if (exists) {
-        return current.map((item) => (item.id === savedId ? savedRecipe : item));
-      }
-      return [savedRecipe, ...current];
-    });
-    setActiveRecipeId(savedId);
+    setIngredients((current) => [ingredient, ...current]);
+    showToast("success", "Ingredient created.");
   };
 
-  const createNewRecipe = () => {
-    const firstActiveIngredient =
-      ingredients.find((ingredient) => ingredient.active)?.id ?? "";
-    setActiveRecipeId(null);
-    setRecipe({
+  const duplicateIngredient = (ingredient: Ingredient) => {
+    setIngredients((current) => [
+      {
+        ...ingredient,
+        id: makeId("ingredient"),
+        name: `${ingredient.name} copy`,
+        sku: `${ingredient.sku}-COPY`,
+        createdAt: "23 Jul 2026",
+        updatedAt: "23 Jul 2026",
+      },
+      ...current,
+    ]);
+    showToast("success", "Ingredient duplicated.");
+  };
+
+  const archiveIngredient = (id: string) => {
+    updateIngredient(id, { active: false });
+    showToast("warning", "Ingredient archived.");
+  };
+
+  const updateRecipe = (recipeId: string, patch: Partial<Recipe>) => {
+    setRecipes((current) =>
+      current.map((recipe) =>
+        recipe.id === recipeId
+          ? { ...recipe, ...patch, updatedAt: todayStamp() }
+          : recipe,
+      ),
+    );
+  };
+
+  const updateFormulaLine = (
+    recipeId: string,
+    lineId: string,
+    patch: Partial<FormulaLine>,
+  ) => {
+    setRecipes((current) =>
+      current.map((recipe) =>
+        recipe.id === recipeId
+          ? {
+              ...recipe,
+              updatedAt: todayStamp(),
+              formulaLines: recipe.formulaLines.map((line) =>
+                line.id === lineId ? { ...line, ...patch } : line,
+              ),
+            }
+          : recipe,
+      ),
+    );
+  };
+
+  const setMainFormulaLine = (recipeId: string, lineId: string) => {
+    setRecipes((current) =>
+      current.map((recipe) =>
+        recipe.id === recipeId
+          ? {
+              ...recipe,
+              formulaLines: recipe.formulaLines.map((line) => ({
+                ...line,
+                isMain: line.id === lineId,
+              })),
+            }
+          : recipe,
+      ),
+    );
+  };
+
+  const addFormulaLine = (recipeId: string) => {
+    setRecipes((current) =>
+      current.map((recipe) =>
+        recipe.id === recipeId
+          ? {
+              ...recipe,
+              formulaLines: [
+                ...recipe.formulaLines,
+                {
+                  id: makeId("formula"),
+                  ingredientId:
+                    ingredients.find((ingredient) => ingredient.active)?.id ?? "",
+                  quantity: 1,
+                  unit: "g",
+                  isMain: recipe.formulaLines.length === 0,
+                  optional: false,
+                  wastage: 0,
+                  notes: "",
+                  sortOrder: recipe.formulaLines.length + 1,
+                },
+              ],
+            }
+          : recipe,
+      ),
+    );
+  };
+
+  const removeFormulaLine = (recipeId: string, lineId: string) => {
+    setRecipes((current) =>
+      current.map((recipe) => {
+        if (recipe.id !== recipeId) return recipe;
+        const nextLines = recipe.formulaLines.filter((line) => line.id !== lineId);
+        const hasMain = nextLines.some((line) => line.isMain);
+        return {
+          ...recipe,
+          formulaLines: nextLines.map((line, index) => ({
+            ...line,
+            isMain: hasMain ? line.isMain : index === 0,
+            sortOrder: index + 1,
+          })),
+        };
+      }),
+    );
+  };
+
+  const moveMethodStep = (recipeId: string, stepId: string, direction: -1 | 1) => {
+    setRecipes((current) =>
+      current.map((recipe) => {
+        if (recipe.id !== recipeId) return recipe;
+        const index = recipe.methodSteps.findIndex((step) => step.id === stepId);
+        const nextIndex = index + direction;
+        if (index < 0 || nextIndex < 0 || nextIndex >= recipe.methodSteps.length) {
+          return recipe;
+        }
+        const nextSteps = [...recipe.methodSteps];
+        const [step] = nextSteps.splice(index, 1);
+        nextSteps.splice(nextIndex, 0, step);
+        return { ...recipe, methodSteps: nextSteps };
+      }),
+    );
+  };
+
+  const updateMethodStep = (
+    recipeId: string,
+    stepId: string,
+    patch: Partial<MethodStep>,
+  ) => {
+    setRecipes((current) =>
+      current.map((recipe) =>
+        recipe.id === recipeId
+          ? {
+              ...recipe,
+              updatedAt: todayStamp(),
+              methodSteps: recipe.methodSteps.map((step) =>
+                step.id === stepId ? { ...step, ...patch } : step,
+              ),
+            }
+          : recipe,
+      ),
+    );
+  };
+
+  const addMethodStep = (recipeId: string) => {
+    setRecipes((current) =>
+      current.map((recipe) =>
+        recipe.id === recipeId
+          ? {
+              ...recipe,
+              updatedAt: todayStamp(),
+              methodSteps: [
+                ...recipe.methodSteps,
+                {
+                  id: makeId("step"),
+                  title: "New method step",
+                  instructions: "",
+                  duration: "",
+                  temperature: "",
+                  equipment: "",
+                  image: "",
+                  notes: "",
+                },
+              ],
+            }
+          : recipe,
+      ),
+    );
+  };
+
+  const removeMethodStep = (recipeId: string, stepId: string) => {
+    setRecipes((current) =>
+      current.map((recipe) =>
+        recipe.id === recipeId
+          ? {
+              ...recipe,
+              updatedAt: todayStamp(),
+              methodSteps: recipe.methodSteps.filter((step) => step.id !== stepId),
+            }
+          : recipe,
+      ),
+    );
+  };
+
+  const createRecipe = () => {
+    const firstIngredient =
+      ingredients.find((ingredient) => ingredient.active)?.id ?? "silverside";
+    const recipe: Recipe = {
+      id: makeId("recipe"),
       name: "Untitled Recipe",
       code: `REC-${Date.now().toString(36).slice(-5).toUpperCase()}`,
       category: "New",
       description: "",
+      version: "0.1",
+      status: "Draft",
+      baseStartingQuantity: 1,
+      baseStartingUnit: "kg",
       expectedYield: 1,
       yieldUnit: "kg",
+      defaultAdditionalCost: 0,
+      defaultSellingUnit: "Per kg",
       pricingMethod: "Gross Margin",
-      profitPercentage: 40,
-      status: "Draft",
+      pricingPercentage: 40,
+      methodIntro: "",
       image: "",
-      version: "0.1",
-    });
-    setFormulaLines([
-      {
-        id: makeId("formula"),
-        ingredientId: firstActiveIngredient,
-        quantity: 1,
-        unit: "kg",
-        isMain: true,
-        optional: false,
-        wastage: 0,
-        notes: "Scaling ingredient",
-      },
-    ]);
-    setMethodSteps([]);
-    setUsageOverrides({});
-    setPricing((current) => ({
-      ...current,
-      method: "Gross Margin",
-      percentage: 40,
-    }));
-    showToast("info", "New unsaved recipe opened.");
+      updatedAt: todayStamp(),
+      formulaLines: [
+        {
+          id: makeId("formula"),
+          ingredientId: firstIngredient,
+          quantity: 1,
+          unit: "kg",
+          isMain: true,
+          optional: false,
+          wastage: 0,
+          notes: "Scaling ingredient",
+          sortOrder: 1,
+        },
+      ],
+      methodSteps: [],
+    };
+    setRecipes((current) => [recipe, ...current]);
+    setActiveRecipeId(recipe.id);
+    navigate(`/recipes/${recipe.id}/edit`);
   };
 
-  const deleteSavedRecipe = (id: string) => {
-    const recipeToDelete = savedRecipes.find((item) => item.id === id);
-    const replacement = savedRecipes.find((item) => item.id !== id);
+  const duplicateRecipe = (recipe: Recipe) => {
+    const duplicate = {
+      ...recipe,
+      id: makeId("recipe"),
+      name: `${recipe.name} copy`,
+      code: `${recipe.code}-COPY`,
+      status: "Draft" as const,
+      updatedAt: todayStamp(),
+      formulaLines: cloneFormula(recipe.formulaLines).map((line) => ({
+        ...line,
+        id: makeId("formula"),
+      })),
+      methodSteps: cloneMethod(recipe.methodSteps).map((step) => ({
+        ...step,
+        id: makeId("step"),
+      })),
+    };
+    setRecipes((current) => [duplicate, ...current]);
+    showToast("success", "Recipe duplicated.");
+  };
 
-    setSavedRecipes((current) => current.filter((item) => item.id !== id));
+  const archiveRecipe = (recipeId: string) => {
+    updateRecipe(recipeId, { status: "Archived" });
+    showToast("warning", "Recipe archived.");
+  };
 
-    if (activeRecipeId === id) {
-      if (replacement) {
-        setActiveRecipeId(replacement.id);
-        setRecipe(recipeFieldsFromSaved(replacement));
-        setFormulaLines(cloneFormulaLines(replacement.formulaLines));
-        setMethodSteps(cloneMethodSteps(replacement.methodSteps));
-        setPricing((current) => ({
-          ...current,
-          method: replacement.pricingMethod,
-          percentage: replacement.profitPercentage,
-        }));
-      } else {
-        setActiveRecipeId(null);
-      }
-      setUsageOverrides({});
+  const deleteRecipe = (recipeId: string) => {
+    const fallbackRecipe = recipes.find((recipe) => recipe.id !== recipeId);
+    if (!fallbackRecipe) {
+      showToast("failed", "Keep at least one recipe in the library.");
+      return;
     }
+    setRecipes((current) => current.filter((recipe) => recipe.id !== recipeId));
+    if (activeRecipeId === recipeId) {
+      setActiveRecipeId(fallbackRecipe.id);
+    }
+    if (productionDraft.recipeId === recipeId) {
+      setProductionDraft((current) => ({ ...current, recipeId: fallbackRecipe.id }));
+    }
+    showToast("warning", "Recipe deleted.");
+  };
 
-    showToast(
-      "warning",
-      recipeToDelete
-        ? `${recipeToDelete.name} deleted.`
-        : "Recipe could not be found.",
+  const startProduction = () => {
+    if (startingProduction) return;
+    setStartingProduction(true);
+    const recipe = selectedProductionRecipe;
+    const lines = productionLinesForRecipe(
+      recipe,
+      productionDraft.mainQuantity,
+      productionDraft.mainUnit,
+      ingredientMap,
+    );
+    const production: ProductionBatch = {
+      id: makeId("production"),
+      batchNumber: `PB-${Date.now().toString(36).slice(-6).toUpperCase()}`,
+      recipeId: recipe.id,
+      recipeName: recipe.name,
+      recipeVersion: recipe.version,
+      status: "In Progress",
+      mainQuantity: productionDraft.mainQuantity,
+      mainUnit: productionDraft.mainUnit,
+      startDate: productionDraft.startDate,
+      endDate: "",
+      responsible: productionDraft.responsible,
+      location: productionDraft.location,
+      expectedCompletion: "2026-07-24T08:00",
+      notes: productionDraft.notes,
+      outcomeNotes: "",
+      completedBy: "",
+      qualityRating: "",
+      startingYield: productionDraft.mainQuantity,
+      completedYield: 0,
+      yieldUnit: productionDraft.mainUnit,
+      methodSnapshot: cloneMethod(recipe.methodSteps),
+      formulaSnapshot: cloneFormula(recipe.formulaLines),
+      lines,
+      additionalCosts: [
+        {
+          id: makeId("cost"),
+          type: "Labour",
+          description: "Production labour",
+          quantity: 1,
+          rate: 85,
+          notes: "",
+        },
+      ],
+    };
+    setProductions((current) => [production, ...current]);
+    window.setTimeout(() => {
+      setStartingProduction(false);
+      showToast("success", "Production started.");
+      navigate(`/productions/${production.id}`);
+    }, 500);
+  };
+
+  const updateProduction = (id: string, patch: Partial<ProductionBatch>) => {
+    setProductions((current) =>
+      current.map((production) =>
+        production.id === id ? { ...production, ...patch } : production,
+      ),
     );
   };
 
-  const addIngredient = () => {
-    setIngredients((current) => [
-      ...current,
-      {
-        id: makeId("ingredient"),
-        name: "New ingredient",
-        category: "Uncategorised",
-        purchaseQuantity: 1,
-        purchaseUnit: "kg",
-        purchaseCost: 0,
-        baseUnit: "kg",
-        supplier: "",
-        sku: "",
-        notes: "",
-        active: true,
-      },
-    ]);
-    showToast("info", "Ingredient row added.");
+  const updateProductionLine = (
+    productionId: string,
+    lineId: string,
+    patch: Partial<ProductionLine>,
+  ) => {
+    setProductions((current) =>
+      current.map((production) =>
+        production.id === productionId
+          ? {
+              ...production,
+              lines: production.lines.map((line) => {
+                if (line.id !== lineId) return line;
+                const nextLine = { ...line, ...patch };
+                const ingredient = ingredientMap.get(nextLine.ingredientId);
+                const actualQuantityInBaseUnit = ingredient
+                  ? convertQuantity(
+                      nextLine.actualQuantity,
+                      nextLine.actualUnit,
+                      ingredient.baseUnit,
+                    )
+                  : nextLine.actualQuantity;
+                return {
+                  ...nextLine,
+                  actualCost: actualQuantityInBaseUnit * nextLine.costSnapshot,
+                };
+              }),
+            }
+          : production,
+      ),
+    );
   };
 
-  const addFormulaLine = () => {
-    setFormulaLines((current) => [
-      ...current,
-      {
-        id: makeId("formula"),
-        ingredientId: ingredients.find((ingredient) => ingredient.active)?.id ?? "",
-        quantity: 1,
-        unit: "g",
-        isMain: current.length === 0,
-        optional: false,
-        wastage: 0,
-        notes: "",
-      },
-    ]);
-  };
-
-  const removeFormulaLine = (id: string) => {
-    setFormulaLines((current) => {
-      const next = current.filter((line) => line.id !== id);
-      if (!next.some((line) => line.isMain) && next[0]) {
-        return next.map((line, index) => ({ ...line, isMain: index === 0 }));
-      }
-      return next;
-    });
-  };
-
-  const duplicateFormulaLine = (id: string) => {
-    setFormulaLines((current) => {
-      const line = current.find((item) => item.id === id);
-      if (!line) return current;
-      return [
-        ...current,
-        {
-          ...line,
-          id: makeId("formula"),
-          isMain: false,
-          notes: line.notes ? `${line.notes} copy` : "Copy",
-        },
-      ];
-    });
-  };
-
-  const addCostLine = () => {
-    setAdditionalCosts((current) => [
-      ...current,
-      {
-        id: makeId("cost"),
-        type: "Other overhead",
-        description: "",
-        quantity: 1,
-        rate: 0,
-        notes: "",
-      },
-    ]);
-  };
-
-  const moveStep = (id: string, direction: -1 | 1) => {
-    setMethodSteps((current) => {
-      const index = current.findIndex((step) => step.id === id);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) {
-        return current;
-      }
-
-      const next = [...current];
-      const [step] = next.splice(index, 1);
-      next.splice(nextIndex, 0, step);
-      return next;
-    });
-  };
-
-  const dropStep = (targetId: string) => {
-    if (!draggingStepId || draggingStepId === targetId) return;
-    setMethodSteps((current) => {
-      const source = current.find((step) => step.id === draggingStepId);
-      if (!source) return current;
-      const withoutSource = current.filter((step) => step.id !== draggingStepId);
-      const targetIndex = withoutSource.findIndex((step) => step.id === targetId);
-      const next = [...withoutSource];
-      next.splice(targetIndex, 0, source);
-      return next;
-    });
-    setDraggingStepId(null);
-  };
-
-  const simulateSave = (target: "recipe" | "batch") => {
-    if (target === "recipe") {
-      setSavingRecipe(true);
-      window.setTimeout(() => {
-        saveCurrentRecipe();
-        setSavingRecipe(false);
-        showToast("success", "Recipe saved successfully.");
-      }, 700);
+  const completeProduction = (production: ProductionBatch) => {
+    if (
+      !production.endDate ||
+      !production.completedBy ||
+      production.startingYield <= 0 ||
+      production.completedYield <= 0
+    ) {
+      showToast("failed", "Enter completion date, yields and completed by.");
       return;
     }
 
-    setSavingBatch(true);
-    window.setTimeout(() => {
-      setSavingBatch(false);
-      showToast("success", "Production batch saved successfully.");
-    }, 700);
+    const ingredientCost = production.lines.reduce(
+      (sum, line) => sum + line.actualCost,
+      0,
+    );
+    const additionalCost = production.additionalCosts.reduce(
+      (sum, cost) => sum + cost.quantity * cost.rate,
+      0,
+    );
+    const totalCost = ingredientCost + additionalCost;
+    const costPerYield =
+      production.completedYield > 0 ? totalCost / production.completedYield : 0;
+    const recipe = recipes.find((item) => item.id === production.recipeId);
+    const unitCost = costPerYield * sellingUnitQuantity(recipe?.defaultSellingUnit ?? "Per kg");
+    const finalSellingPrice = sellingPrice(
+      unitCost,
+      recipe?.pricingMethod ?? "Gross Margin",
+      recipe?.pricingPercentage ?? 40,
+    );
+
+    updateProduction(production.id, {
+      status: "Completed",
+      finalTotalCost: totalCost,
+      finalCostPerYield: costPerYield,
+      finalSellingPrice,
+    });
+    showToast("success", "Production completed.");
+    navigate("/productions/completed");
   };
 
-  const toastHeading =
-    toast?.kind === "success"
-      ? "Successful"
-      : toast?.kind === "failed"
-        ? "Failed"
-        : toast?.kind === "warning"
-          ? "Attention"
-          : "Notice";
-
-  const toastIcon =
-    toast?.kind === "success"
-      ? "+"
-      : toast?.kind === "failed"
-        ? "!"
-        : toast?.kind === "warning"
-          ? "!"
-          : "i";
+  const pageTitle = pageTitleForPath(pathname);
 
   return (
     <main className="app-shell">
@@ -1255,343 +1435,610 @@ export default function Home() {
         {toast ? (
           <div className={`toast ${toast.kind}`} role="status">
             <span className="toast-icon" aria-hidden="true">
-              {toastIcon}
+              {toast.kind === "success" ? "+" : toast.kind === "info" ? "i" : "!"}
             </span>
             <span>
-              <strong>{toastHeading}</strong>
+              <strong>
+                {toast.kind === "success"
+                  ? "Successful"
+                  : toast.kind === "failed"
+                    ? "Failed"
+                    : toast.kind === "warning"
+                      ? "Attention"
+                      : "Notice"}
+              </strong>
               <small>{toast.message}</small>
             </span>
           </div>
         ) : null}
       </div>
 
-      <aside className="sidebar" aria-label="Application navigation">
-        <div className="brand-block">
-          <span className="brand-mark">RC</span>
-          <span>
-            <strong>Recipe Cost</strong>
-            <small>Formula operations</small>
-          </span>
-        </div>
-        <nav>
-          <a href="#recipes">Recipes</a>
-          <a href="#formula">Formula</a>
-          <a href="#production">Production</a>
-          <a href="#ingredients">Ingredients</a>
-          <a href="#method">Method</a>
-          <a href="#reports">Reports</a>
-        </nav>
-      </aside>
-
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Recipe Formula / Production / Costing</p>
-            <h1>{recipe.name}</h1>
-            <p>
-              Scale every formula line from the main ingredient, compare actual
-              usage, and price from final usable yield.
-            </p>
+            <p className="eyebrow">Recipe Cost Calculator</p>
+            <h1>{pageTitle.title}</h1>
+            <p>{pageTitle.description}</p>
           </div>
           <div className="topbar-actions" aria-label="Primary actions">
             <button
               type="button"
               className="ghost-button"
-              onClick={() => showToast("info", "Version snapshot prepared.")}
+              onClick={() => navigate("/productions/new")}
             >
-              Version {recipe.version}
+              New Production
             </button>
             <button
               type="button"
               className="primary-button"
-              disabled={savingRecipe}
-              onClick={() => simulateSave("recipe")}
+              onClick={createRecipe}
             >
-              {savingRecipe ? "Saving..." : "Save recipe"}
+              New Recipe
             </button>
           </div>
         </header>
 
-        <section className="panel" id="recipes">
+        {pathname === "/" || pathname === "/dashboard"
+          ? renderDashboard()
+          : pathname === "/ingredients"
+            ? renderIngredientsBible()
+            : pathname === "/recipes"
+              ? renderRecipesList()
+              : pathname === "/recipes/new" ||
+                  /^\/recipes\/[^/]+(\/edit)?$/.test(pathname)
+                ? renderRecipeWorkspace()
+                : pathname === "/productions" || pathname === "/productions/"
+                  ? renderProductionsSummary()
+                  : pathname === "/productions/new"
+                    ? renderNewProduction()
+                    : pathname === "/productions/in-progress"
+                      ? renderInProgress()
+                      : pathname === "/productions/completed"
+                        ? renderCompletedProductions()
+                        : /^\/productions\/[^/]+$/.test(pathname)
+                          ? renderProductionDetail()
+                          : pathname === "/reports"
+                            ? renderReports()
+                            : renderSettings()}
+      </section>
+
+      <aside className="sidebar" aria-label="Primary application navigation">
+        <div className="brand-block">
+          <span className="brand-mark">RC</span>
+          <span>
+            <strong>Recipe Cost</strong>
+            <small>Operations</small>
+          </span>
+        </div>
+        <nav>
+          {[
+            ["D", "Dashboard", "/dashboard"],
+            ["I", "Ingredients Bible", "/ingredients"],
+            ["R", "Recipes", "/recipes"],
+            ["P", "Productions", "/productions"],
+            ["A", "Reports", "/reports"],
+            ["S", "Settings", "/settings"],
+          ].map(([icon, label, href]) => (
+            <a
+              key={href}
+              href={href}
+              className={isActiveNav(pathname, href) ? "active" : ""}
+              onClick={(event) => {
+                event.preventDefault();
+                navigate(href);
+              }}
+            >
+              <span className="nav-icon" aria-hidden="true">
+                {icon}
+              </span>
+              <span>{label}</span>
+            </a>
+          ))}
+        </nav>
+      </aside>
+
+      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+        {[
+          ["Home", "/dashboard"],
+          ["Ingredients", "/ingredients"],
+          ["Recipes", "/recipes"],
+          ["Productions", "/productions"],
+          ["More", "/reports"],
+        ].map(([label, href]) => (
+          <a
+            key={href}
+            href={href}
+            className={isActiveNav(pathname, href) ? "active" : ""}
+            onClick={(event) => {
+              event.preventDefault();
+              navigate(href);
+            }}
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+    </main>
+  );
+
+  function renderDashboard() {
+    const draftRecipes = recipes.filter((recipe) => recipe.status === "Draft").length;
+    const ingredientValue = ingredients.reduce(
+      (sum, ingredient) => sum + ingredient.purchaseCost,
+      0,
+    );
+    return (
+      <section className="page-stack">
+        <div className="metric-grid dashboard-metrics">
+          <div>
+            <span>Active ingredients</span>
+            <strong>{ingredients.filter((ingredient) => ingredient.active).length}</strong>
+          </div>
+          <div>
+            <span>Saved recipes</span>
+            <strong>{recipes.length}</strong>
+          </div>
+          <div>
+            <span>In progress</span>
+            <strong>{activeProductions.length}</strong>
+          </div>
+          <div>
+            <span>Completed batches</span>
+            <strong>{completedProductions.length}</strong>
+          </div>
+        </div>
+        <section className="panel">
           <div className="section-title">
             <div>
-              <h2>Recipes</h2>
-              <p>Saved formulas are stored here for editing or removal.</p>
+              <h2>Current activity</h2>
+              <p>Compact summary without loading every operational page.</p>
             </div>
-            <button
-              type="button"
-              className="compact-button"
-              onClick={createNewRecipe}
-            >
-              + Recipe
+          </div>
+          <div className="summary-grid">
+            <div className="summary-cell">
+              <span>Draft recipes</span>
+              <strong>{draftRecipes}</strong>
+              <small>Open Recipes to continue editing formulas.</small>
+            </div>
+            <div className="summary-cell">
+              <span>Ingredient purchase value</span>
+              <strong>{formatCurrency(ingredientValue)}</strong>
+              <small>Current library purchase-cost basis.</small>
+            </div>
+            <div className="summary-cell">
+              <span>Next action</span>
+              <strong>Start production</strong>
+              <small>Choose a saved recipe and confirm the method snapshot.</small>
+            </div>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  function renderIngredientsBible() {
+    const categories = ["All", ...Array.from(new Set(ingredients.map((item) => item.category)))];
+    const suppliers = ["All", ...Array.from(new Set(ingredients.map((item) => item.supplier)))];
+    return (
+      <section className="page-stack">
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>Ingredients Bible</h2>
+              <p>Central ingredient library used by all recipe formula lines.</p>
+            </div>
+            <button type="button" className="compact-button" onClick={createIngredient}>
+              + Ingredient
             </button>
           </div>
-
-          <div className="sheet recipe-sheet" role="table" aria-label="Saved recipes">
+          <div className="filter-bar">
+            <input
+              aria-label="Search ingredients"
+              placeholder="Search ingredient or SKU"
+              value={ingredientSearch}
+              onChange={(event) => setIngredientSearch(event.target.value)}
+            />
+            <select
+              aria-label="Category filter"
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+            >
+              {categories.map((category) => (
+                <option key={category}>{category}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Supplier filter"
+              value={supplierFilter}
+              onChange={(event) => setSupplierFilter(event.target.value)}
+            >
+              {suppliers.map((supplier) => (
+                <option key={supplier}>{supplier}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Active status filter"
+              value={activeFilter}
+              onChange={(event) => setActiveFilter(event.target.value)}
+            >
+              <option>All</option>
+              <option>Active</option>
+              <option>Inactive</option>
+            </select>
+          </div>
+          <div className="sheet ingredient-bible-sheet" role="table">
             <div className="sheet-head" role="row">
-              <span role="columnheader">Recipe</span>
-              <span role="columnheader">Code</span>
+              <span role="columnheader">Ingredient</span>
               <span role="columnheader">Category</span>
-              <span role="columnheader">Main</span>
-              <span role="columnheader">Lines</span>
-              <span role="columnheader">Formula cost</span>
-              <span role="columnheader">Pricing</span>
+              <span role="columnheader">Supplier</span>
+              <span role="columnheader">SKU</span>
+              <span role="columnheader">Purchase</span>
+              <span role="columnheader">Cost</span>
+              <span role="columnheader">Base</span>
+              <span role="columnheader">Cost/base</span>
+              <span role="columnheader">Waste %</span>
               <span role="columnheader">Status</span>
-              <span role="columnheader">Updated</span>
               <span role="columnheader">Actions</span>
             </div>
-            {savedRecipeRows.map((savedRecipe) => (
-              <div
-                className={`sheet-row ${
-                  savedRecipe.id === activeRecipeId ? "selected-row" : ""
-                }`}
-                role="row"
-                key={savedRecipe.id}
-              >
+            {filteredIngredients.map((ingredient) => (
+              <div className="sheet-row" role="row" key={ingredient.id}>
                 <span role="cell">
-                  <strong>{savedRecipe.name}</strong>
-                  {savedRecipe.id === activeRecipeId ? <small>Editing</small> : null}
+                  <input
+                    value={ingredient.name}
+                    onChange={(event) =>
+                      updateIngredient(ingredient.id, { name: event.target.value })
+                    }
+                    aria-label={`Ingredient name ${ingredient.name}`}
+                  />
                 </span>
-                <span role="cell" className="muted-cell">
-                  {savedRecipe.code}
+                <span role="cell">
+                  <input
+                    value={ingredient.category}
+                    onChange={(event) =>
+                      updateIngredient(ingredient.id, { category: event.target.value })
+                    }
+                    aria-label={`Category ${ingredient.name}`}
+                  />
                 </span>
-                <span role="cell" className="muted-cell">
-                  {savedRecipe.category}
+                <span role="cell">
+                  <input
+                    value={ingredient.supplier}
+                    onChange={(event) =>
+                      updateIngredient(ingredient.id, { supplier: event.target.value })
+                    }
+                    aria-label={`Supplier ${ingredient.name}`}
+                  />
                 </span>
-                <span role="cell" className="muted-cell">
-                  {savedRecipe.mainIngredientName}
+                <span role="cell">
+                  <input
+                    value={ingredient.sku}
+                    onChange={(event) =>
+                      updateIngredient(ingredient.id, { sku: event.target.value })
+                    }
+                    aria-label={`SKU ${ingredient.name}`}
+                  />
                 </span>
-                <span role="cell" className="numeric-cell">
-                  {savedRecipe.lineCount}
+                <span role="cell" className="quantity-pair">
+                  <NumberInput
+                    label={`Purchase quantity ${ingredient.name}`}
+                    value={ingredient.purchaseQuantity}
+                    onChange={(value) =>
+                      updateIngredient(ingredient.id, { purchaseQuantity: value })
+                    }
+                  />
+                  <UnitSelect
+                    label={`Purchase unit ${ingredient.name}`}
+                    value={ingredient.purchaseUnit}
+                    onChange={(value) =>
+                      updateIngredient(ingredient.id, { purchaseUnit: value })
+                    }
+                  />
+                </span>
+                <span role="cell">
+                  <NumberInput
+                    label={`Purchase cost ${ingredient.name}`}
+                    value={ingredient.purchaseCost}
+                    onChange={(value) =>
+                      updateIngredient(ingredient.id, {
+                        purchaseCost: value,
+                        lastCostUpdate: "23 Jul 2026",
+                      })
+                    }
+                  />
+                </span>
+                <span role="cell">
+                  <UnitSelect
+                    label={`Recipe base unit ${ingredient.name}`}
+                    value={ingredient.baseUnit}
+                    onChange={(value) =>
+                      updateIngredient(ingredient.id, { baseUnit: value })
+                    }
+                  />
                 </span>
                 <span role="cell" className="numeric-cell strong-cell">
-                  {formatCurrency(savedRecipe.formulaCost)}
-                </span>
-                <span role="cell" className="muted-cell">
-                  {savedRecipe.pricingMethod} {formatNumber(savedRecipe.profitPercentage, 1)}%
+                  {formatCurrency(ingredientUnitCost(ingredient), 4)}
                 </span>
                 <span role="cell">
-                  <strong className="status-chip muted-status">
-                    {savedRecipe.status}
-                  </strong>
+                  <NumberInput
+                    label={`Default wastage ${ingredient.name}`}
+                    value={ingredient.defaultWastage}
+                    onChange={(value) =>
+                      updateIngredient(ingredient.id, { defaultWastage: value })
+                    }
+                  />
                 </span>
-                <span role="cell" className="muted-cell">
-                  {savedRecipe.updatedAt}
+                <span role="cell">
+                  <strong className={`status-chip ${ingredient.active ? "" : "muted-status"}`}>
+                    {ingredient.active ? "Active" : "Inactive"}
+                  </strong>
                 </span>
                 <span role="cell" className="action-cell">
                   <button
                     type="button"
-                    className="compact-button"
-                    onClick={() => loadSavedRecipe(savedRecipe)}
+                    className="icon-button"
+                    title="Edit"
+                    aria-label={`Edit ${ingredient.name}`}
+                    onClick={() => showToast("info", `${ingredient.name} is editable inline.`)}
                   >
-                    Edit
+                    E
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title="Duplicate"
+                    aria-label={`Duplicate ${ingredient.name}`}
+                    onClick={() => duplicateIngredient(ingredient)}
+                  >
+                    D
                   </button>
                   <button
                     type="button"
                     className="icon-button danger"
-                    aria-label={`Delete ${savedRecipe.name}`}
-                    title="Delete"
-                    onClick={() => deleteSavedRecipe(savedRecipe.id)}
+                    title="Archive"
+                    aria-label={`Archive ${ingredient.name}`}
+                    onClick={() => archiveIngredient(ingredient.id)}
                   >
-                    X
+                    A
                   </button>
                 </span>
               </div>
             ))}
-            {savedRecipeRows.length === 0 ? (
-              <div className="sheet-empty">No saved recipes</div>
-            ) : null}
           </div>
-
-          <div className="mobile-records" aria-label="Saved recipes mobile">
-            {savedRecipeRows.map((savedRecipe) => (
-              <details className="sheet-record" key={savedRecipe.id}>
+          <div className="mobile-records">
+            {filteredIngredients.map((ingredient) => (
+              <details className="sheet-record" key={ingredient.id}>
                 <summary>
                   <span>
-                    <strong>{savedRecipe.name}</strong>
-                    <small>
-                      {savedRecipe.code} / {savedRecipe.mainIngredientName}
-                    </small>
+                    <strong>{ingredient.name}</strong>
+                    <small>{ingredient.supplier} / {ingredient.sku}</small>
                   </span>
-                  <span>{formatCurrency(savedRecipe.formulaCost)}</span>
+                  <span>{formatCurrency(ingredientUnitCost(ingredient), 4)}</span>
                 </summary>
                 <div className="record-grid">
                   <div className="record-metric">
-                    <span>Status</span>
-                    <strong>{savedRecipe.status}</strong>
-                  </div>
-                  <div className="record-metric">
-                    <span>Formula lines</span>
-                    <strong>{savedRecipe.lineCount}</strong>
-                  </div>
-                  <div className="record-metric">
-                    <span>Pricing</span>
+                    <span>Purchase</span>
                     <strong>
-                      {savedRecipe.pricingMethod}{" "}
-                      {formatNumber(savedRecipe.profitPercentage, 1)}%
+                      {formatNumber(ingredient.purchaseQuantity, 2)}{" "}
+                      {ingredient.purchaseUnit}
                     </strong>
                   </div>
                   <div className="record-metric">
-                    <span>Updated</span>
-                    <strong>{savedRecipe.updatedAt}</strong>
+                    <span>Base unit</span>
+                    <strong>{ingredient.baseUnit}</strong>
+                  </div>
+                  <div className="record-metric">
+                    <span>Last cost update</span>
+                    <strong>{ingredient.lastCostUpdate}</strong>
                   </div>
                   <div className="record-actions">
                     <button
                       type="button"
                       className="compact-button"
-                      onClick={() => loadSavedRecipe(savedRecipe)}
+                      onClick={() => duplicateIngredient(ingredient)}
                     >
-                      Edit
+                      Duplicate
                     </button>
                     <button
                       type="button"
                       className="compact-button delete-button"
-                      onClick={() => deleteSavedRecipe(savedRecipe.id)}
+                      onClick={() => archiveIngredient(ingredient.id)}
                     >
-                      Delete
+                      Archive
                     </button>
                   </div>
                 </div>
               </details>
             ))}
-            {savedRecipeRows.length === 0 ? (
-              <div className="sheet-record empty-record">No saved recipes</div>
-            ) : null}
           </div>
         </section>
+      </section>
+    );
+  }
 
-        <section className="hero-grid" aria-label="Batch scaling summary">
-          <div className="scale-panel" id="formula">
-            <div className="section-title">
-              <div>
-                <h2>Production scaler</h2>
-                <p>
-                  Main ingredient:{" "}
-                  <strong>{mainIngredient?.name ?? "No main ingredient"}</strong>
-                </p>
-              </div>
-              <span className="status-chip">{production.status}</span>
-            </div>
-            <div className="scale-control">
-              <Field label="Main quantity used" required>
-                <span className="quantity-pair">
-                  <NumberInput
-                    label="Main ingredient quantity used"
-                    value={production.mainQuantity}
-                    onChange={(value) =>
-                      setProduction((current) => ({
-                        ...current,
-                        mainQuantity: value,
-                      }))
-                    }
-                  />
-                  <UnitSelect
-                    label="Main ingredient unit"
-                    value={production.mainUnit}
-                    onChange={(value) =>
-                      setProduction((current) => ({ ...current, mainUnit: value }))
-                    }
-                  />
-                </span>
-              </Field>
-              <div className="calculation-strip">
-                <span>Scaling factor</span>
-                <strong>{formatNumber(scalingFactor, 3)}x</strong>
-                <small>
-                  {formatNumber(production.mainQuantity, 3)} {production.mainUnit} /{" "}
-                  {formatNumber(mainLine?.quantity ?? 0, 3)} {mainLine?.unit ?? ""}
-                </small>
-              </div>
-            </div>
-            <div className="mini-output" aria-label="Scaled output preview">
-              {productionRows.slice(0, 6).map((row) => (
-                <span key={row.id}>
-                  <strong>{row.ingredient?.name}</strong>
-                  {formatNumber(row.requiredQuantity, row.unit === "kg" ? 3 : 1)}{" "}
-                  {row.unit}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <aside className="cost-panel" aria-label="Costing summary">
-            <h2>Live costing</h2>
-            <dl>
-              <div>
-                <dt>Formula cost</dt>
-                <dd>{formatCurrency(totalFormulaCost)}</dd>
-              </div>
-              <div>
-                <dt>Expected ingredient cost</dt>
-                <dd>{formatCurrency(expectedIngredientCost)}</dd>
-              </div>
-              <div>
-                <dt>Actual ingredient cost</dt>
-                <dd>{formatCurrency(actualIngredientCost)}</dd>
-              </div>
-              <div>
-                <dt>Additional costs</dt>
-                <dd>{formatCurrency(additionalCostTotal)}</dd>
-              </div>
-              <div className="total-line">
-                <dt>Total production cost</dt>
-                <dd>{formatCurrency(totalProductionCost)}</dd>
-              </div>
-              <div>
-                <dt>Cost per kg</dt>
-                <dd>{formatCurrency(costPerKg)}</dd>
-              </div>
-              <div className="total-line">
-                <dt>{pricing.sellingUnit} price</dt>
-                <dd>{formatCurrency(sellingPrice)}</dd>
-              </div>
-            </dl>
-          </aside>
-        </section>
-
+  function renderRecipesList() {
+    return (
+      <section className="page-stack">
         <section className="panel">
           <div className="section-title">
             <div>
-              <h2>Recipe details</h2>
-              <p>Compact saved formula metadata and pricing defaults.</p>
+              <h2>Recipes</h2>
+              <p>Create and manage production formulas separate from ingredients.</p>
+            </div>
+            <button type="button" className="compact-button" onClick={createRecipe}>
+              + Recipe
+            </button>
+          </div>
+          <div className="sheet recipes-list-sheet" role="table">
+            <div className="sheet-head" role="row">
+              <span role="columnheader">Recipe</span>
+              <span role="columnheader">Code</span>
+              <span role="columnheader">Category</span>
+              <span role="columnheader">Main</span>
+              <span role="columnheader">Base qty</span>
+              <span role="columnheader">Yield</span>
+              <span role="columnheader">Base cost</span>
+              <span role="columnheader">Cost/yield</span>
+              <span role="columnheader">Version</span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Updated</span>
+              <span role="columnheader">Actions</span>
+            </div>
+            {recipeRows.map((recipe) => {
+              const mainLine = recipeMainLine(recipe);
+              return (
+                <div className="sheet-row" role="row" key={recipe.id}>
+                  <span role="cell"><strong>{recipe.name}</strong></span>
+                  <span role="cell" className="muted-cell">{recipe.code}</span>
+                  <span role="cell" className="muted-cell">{recipe.category}</span>
+                  <span role="cell" className="muted-cell">{recipe.mainIngredient}</span>
+                  <span role="cell" className="numeric-cell">
+                    {formatNumber(mainLine?.quantity ?? 0, 3)} {mainLine?.unit}
+                  </span>
+                  <span role="cell" className="numeric-cell">
+                    {formatNumber(recipe.expectedYield, 3)} {recipe.yieldUnit}
+                  </span>
+                  <span role="cell" className="numeric-cell strong-cell">
+                    {formatCurrency(recipe.formulaCost)}
+                  </span>
+                  <span role="cell" className="numeric-cell">
+                    {formatCurrency(recipe.costPerYield)}
+                  </span>
+                  <span role="cell">v{recipe.version}</span>
+                  <span role="cell"><strong className="status-chip muted-status">{recipe.status}</strong></span>
+                  <span role="cell" className="muted-cell">{recipe.updatedAt}</span>
+                  <span role="cell" className="action-cell wide-actions">
+                    <button type="button" className="compact-button" onClick={() => navigate(`/recipes/${recipe.id}`)}>View</button>
+                    <button type="button" className="compact-button" onClick={() => { setActiveRecipeId(recipe.id); navigate(`/recipes/${recipe.id}/edit`); }}>Edit</button>
+                    <button type="button" className="compact-button" onClick={() => duplicateRecipe(recipe)}>Duplicate</button>
+                    <button type="button" className="compact-button" onClick={() => { setProductionDraft((current) => ({ ...current, recipeId: recipe.id })); navigate(`/productions/new?recipeId=${recipe.id}`); }}>Create Production</button>
+                    <button type="button" className="compact-button delete-button" onClick={() => archiveRecipe(recipe.id)}>Archive</button>
+                    <button type="button" className="compact-button delete-button" onClick={() => deleteRecipe(recipe.id)}>Delete</button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mobile-records">
+            {recipeRows.map((recipe) => (
+              <details className="sheet-record" key={recipe.id}>
+                <summary>
+                  <span>
+                    <strong>{recipe.name}</strong>
+                    <small>{recipe.code} / {recipe.mainIngredient}</small>
+                  </span>
+                  <span>{formatCurrency(recipe.costPerYield)}</span>
+                </summary>
+                <div className="record-grid">
+                  <div className="record-metric"><span>Yield</span><strong>{formatNumber(recipe.expectedYield, 3)} {recipe.yieldUnit}</strong></div>
+                  <div className="record-metric"><span>Version</span><strong>v{recipe.version}</strong></div>
+                  <div className="record-actions">
+                    <button type="button" className="compact-button" onClick={() => navigate(`/recipes/${recipe.id}`)}>View</button>
+                    <button type="button" className="compact-button" onClick={() => { setActiveRecipeId(recipe.id); navigate(`/recipes/${recipe.id}/edit`); }}>Edit</button>
+                    <button type="button" className="compact-button" onClick={() => { setProductionDraft((current) => ({ ...current, recipeId: recipe.id })); navigate(`/productions/new?recipeId=${recipe.id}`); }}>Production</button>
+                    <button type="button" className="compact-button delete-button" onClick={() => deleteRecipe(recipe.id)}>Delete</button>
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  function renderRecipeWorkspace() {
+    const idFromPath = pathname.split("/")[2];
+    const recipe =
+      pathname === "/recipes/new"
+        ? activeRecipe
+        : recipes.find((item) => item.id === idFromPath) ?? activeRecipe;
+    const isReadOnly = /^\/recipes\/[^/]+$/.test(pathname);
+    const formulaCost = recipeFormulaCost(recipe, ingredientMap);
+    const expectedTotal = formulaCost + recipe.defaultAdditionalCost;
+    const yieldPercentage =
+      recipe.baseStartingQuantity > 0
+        ? (convertQuantity(recipe.expectedYield, recipe.yieldUnit, recipe.baseStartingUnit) /
+            recipe.baseStartingQuantity) *
+          100
+        : 0;
+    const expectedLoss = Math.max(
+      recipe.baseStartingQuantity -
+        convertQuantity(recipe.expectedYield, recipe.yieldUnit, recipe.baseStartingUnit),
+      0,
+    );
+    const costPerYield = recipe.expectedYield > 0 ? expectedTotal / recipe.expectedYield : 0;
+    const estimatedPrice = sellingPrice(
+      costPerYield * sellingUnitQuantity(recipe.defaultSellingUnit),
+      recipe.pricingMethod,
+      recipe.pricingPercentage,
+    );
+
+    return (
+      <section className="page-stack">
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>{isReadOnly ? "Recipe view" : "Recipe editor"}</h2>
+              <p>Base Formula / Method / Expected Yield and Cost</p>
+            </div>
+            <div className="topbar-actions">
+              {isReadOnly ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => navigate(`/recipes/${recipe.id}/edit`)}
+                >
+                  Edit Recipe
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={savingRecipe}
+                  onClick={() => {
+                    setSavingRecipe(true);
+                    window.setTimeout(() => {
+                      updateRecipe(recipe.id, {});
+                      setSavingRecipe(false);
+                      showToast("success", "Recipe saved successfully.");
+                    }, 500);
+                  }}
+                >
+                  {savingRecipe ? "Saving..." : "Save Recipe"}
+                </button>
+              )}
             </div>
           </div>
           <div className="form-grid four">
             <Field label="Recipe name" required>
               <input
+                readOnly={isReadOnly}
                 value={recipe.name}
-                onChange={(event) =>
-                  setRecipe((current) => ({ ...current, name: event.target.value }))
-                }
+                onChange={(event) => updateRecipe(recipe.id, { name: event.target.value })}
               />
             </Field>
             <Field label="Recipe code" required>
               <input
+                readOnly={isReadOnly}
                 value={recipe.code}
-                onChange={(event) =>
-                  setRecipe((current) => ({ ...current, code: event.target.value }))
-                }
+                onChange={(event) => updateRecipe(recipe.id, { code: event.target.value })}
               />
             </Field>
             <Field label="Category">
               <input
+                readOnly={isReadOnly}
                 value={recipe.category}
-                onChange={(event) =>
-                  setRecipe((current) => ({
-                    ...current,
-                    category: event.target.value,
-                  }))
-                }
+                onChange={(event) => updateRecipe(recipe.id, { category: event.target.value })}
               />
             </Field>
             <Field label="Status">
               <select
+                disabled={isReadOnly}
                 value={recipe.status}
                 onChange={(event) =>
-                  setRecipe((current) => ({
-                    ...current,
-                    status: event.target.value,
-                  }))
+                  updateRecipe(recipe.id, {
+                    status: event.target.value as Recipe["status"],
+                  })
                 }
               >
                 <option>Draft</option>
@@ -1599,100 +2046,25 @@ export default function Home() {
                 <option>Archived</option>
               </select>
             </Field>
-            <Field label="Expected base yield">
-              <span className="quantity-pair">
-                <NumberInput
-                  label="Expected base yield"
-                  value={recipe.expectedYield}
-                  onChange={(value) =>
-                    setRecipe((current) => ({ ...current, expectedYield: value }))
-                  }
-                />
-                <UnitSelect
-                  label="Yield unit"
-                  value={recipe.yieldUnit}
-                  onChange={(value) =>
-                    setRecipe((current) => ({ ...current, yieldUnit: value }))
-                  }
-                />
-              </span>
-            </Field>
-            <Field label="Pricing method">
-              <select
-                value={recipe.pricingMethod}
-                onChange={(event) =>
-                  setRecipe((current) => ({
-                    ...current,
-                    pricingMethod: event.target.value,
-                  }))
-                }
-              >
-                <option>Markup</option>
-                <option>Gross Margin</option>
-              </select>
-            </Field>
-            <Field label="Default profit %">
-              <NumberInput
-                label="Default profit percentage"
-                value={recipe.profitPercentage}
-                onChange={(value) =>
-                  setRecipe((current) => ({
-                    ...current,
-                    profitPercentage: value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Version">
-              <input
-                value={recipe.version}
-                onChange={(event) =>
-                  setRecipe((current) => ({
-                    ...current,
-                    version: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Description">
-              <textarea
-                value={recipe.description}
-                onChange={(event) =>
-                  setRecipe((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Recipe image">
-              <input
-                placeholder="Image URL or file reference"
-                value={recipe.image}
-                onChange={(event) =>
-                  setRecipe((current) => ({ ...current, image: event.target.value }))
-                }
-              />
-            </Field>
           </div>
         </section>
 
         <section className="panel">
           <div className="section-title">
             <div>
-              <h2>Formula builder</h2>
-              <p>One line must be marked as the main scaling ingredient.</p>
+              <h2>Base Formula</h2>
+              <p>Formula lines select linked records from the Ingredients Bible.</p>
             </div>
-            <button type="button" className="compact-button" onClick={addFormulaLine}>
-              + Line
-            </button>
+            {!isReadOnly ? (
+              <button type="button" className="compact-button" onClick={() => addFormulaLine(recipe.id)}>
+                + Line
+              </button>
+            ) : null}
           </div>
-
-          <div className="sheet formula-sheet" role="table" aria-label="Recipe formula lines">
+          <div className="sheet formula-sheet" role="table">
             <div className="sheet-head" role="row">
               <span role="columnheader">Ingredient</span>
-              <span role="columnheader">Purchase</span>
-              <span role="columnheader">Base cost</span>
+              <span role="columnheader">Current unit cost</span>
               <span role="columnheader">Formula qty</span>
               <span role="columnheader">Waste %</span>
               <span role="columnheader">Line cost</span>
@@ -1700,1264 +2072,812 @@ export default function Home() {
               <span role="columnheader">Notes</span>
               <span role="columnheader">Actions</span>
             </div>
-            {formulaRows.map((row) => (
-              <div className="sheet-row" role="row" key={row.id}>
-                <span role="cell">
-                  <select
-                    value={row.ingredientId}
-                    onChange={(event) =>
-                      updateFormulaLine(row.id, "ingredientId", event.target.value)
-                    }
-                    aria-label={`Ingredient for row ${row.index + 1}`}
-                  >
-                    {ingredients.map((ingredient) => (
-                      <option key={ingredient.id} value={ingredient.id}>
-                        {ingredient.name}
-                      </option>
-                    ))}
-                  </select>
-                </span>
-                <span role="cell" className="muted-cell">
-                  {formatCurrency(row.ingredient?.purchaseCost ?? 0)} /{" "}
-                  {formatNumber(row.ingredient?.purchaseQuantity ?? 0, 2)}{" "}
-                  {row.ingredient?.purchaseUnit}
-                </span>
-                <span role="cell" className="numeric-cell">
-                  {formatCurrency(row.baseCost)} / {row.ingredient?.baseUnit}
-                </span>
-                <span role="cell" className="quantity-pair">
-                  <NumberInput
-                    label={`Formula quantity for ${row.ingredient?.name}`}
-                    value={row.quantity}
-                    onChange={(value) => updateFormulaLine(row.id, "quantity", value)}
-                  />
-                  <UnitSelect
-                    label={`Formula unit for ${row.ingredient?.name}`}
-                    value={row.unit}
-                    onChange={(value) => updateFormulaLine(row.id, "unit", value)}
-                  />
-                </span>
-                <span role="cell">
-                  <NumberInput
-                    label={`Wastage percentage for ${row.ingredient?.name}`}
-                    value={row.wastage}
-                    onChange={(value) => updateFormulaLine(row.id, "wastage", value)}
-                  />
-                </span>
-                <span role="cell" className="numeric-cell strong-cell">
-                  {formatCurrency(row.lineCost)}
-                </span>
-                <span role="cell" className="center-cell">
-                  <input
-                    type="radio"
-                    aria-label={`Mark ${row.ingredient?.name} as main ingredient`}
-                    checked={row.isMain}
-                    onChange={() => setMainFormulaLine(row.id)}
-                  />
-                </span>
-                <span role="cell">
-                  <input
-                    value={row.notes}
-                    onChange={(event) =>
-                      updateFormulaLine(row.id, "notes", event.target.value)
-                    }
-                    aria-label={`Notes for ${row.ingredient?.name}`}
-                  />
-                </span>
-                <span role="cell" className="action-cell">
-                  <label className="toggle-mini" title="Optional ingredient">
-                    <input
-                      type="checkbox"
-                      checked={row.optional}
-                      onChange={(event) =>
-                        updateFormulaLine(row.id, "optional", event.target.checked)
-                      }
-                    />
-                    Opt
-                  </label>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Duplicate ${row.ingredient?.name}`}
-                    title="Duplicate"
-                    onClick={() => duplicateFormulaLine(row.id)}
-                  >
-                    D
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button danger"
-                    aria-label={`Delete ${row.ingredient?.name}`}
-                    title="Delete"
-                    onClick={() => removeFormulaLine(row.id)}
-                  >
-                    X
-                  </button>
-                </span>
-              </div>
-            ))}
-            <div className="sheet-total" role="row">
-              <span role="cell">Total formula cost</span>
-              <span role="cell" />
-              <span role="cell" />
-              <span role="cell" />
-              <span role="cell" />
-              <span role="cell" className="numeric-cell">
-                {formatCurrency(totalFormulaCost)}
-              </span>
-              <span role="cell" />
-              <span role="cell" />
-              <span role="cell" />
-            </div>
-          </div>
-
-          <div className="mobile-records" aria-label="Formula lines mobile">
-            {formulaRows.map((row) => (
-              <details className="sheet-record" key={row.id}>
-                <summary>
-                  <span>
-                    <strong>{row.ingredient?.name}</strong>
-                    <small>
-                      {formatNumber(row.quantity, row.unit === "kg" ? 3 : 1)}{" "}
-                      {row.unit}
-                    </small>
-                  </span>
-                  <span>{formatCurrency(row.lineCost)}</span>
-                </summary>
-                <div className="record-grid">
-                  <Field label="Quantity">
-                    <span className="quantity-pair">
+            {recipe.formulaLines
+              .slice()
+              .sort((a, b) => a.sortOrder - b.sortOrder)
+              .map((line) => {
+                const ingredient = ingredientMap.get(line.ingredientId);
+                return (
+                  <div className="sheet-row" role="row" key={line.id}>
+                    <span role="cell">
+                      <select
+                        disabled={isReadOnly}
+                        value={line.ingredientId}
+                        onChange={(event) =>
+                          updateFormulaLine(recipe.id, line.id, {
+                            ingredientId: event.target.value,
+                          })
+                        }
+                      >
+                        {ingredients.map((ingredientOption) => (
+                          <option key={ingredientOption.id} value={ingredientOption.id}>
+                            {ingredientOption.name}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                    <span role="cell" className="numeric-cell">
+                      {formatCurrency(ingredient ? ingredientUnitCost(ingredient) : 0, 4)} /{" "}
+                      {ingredient?.baseUnit}
+                    </span>
+                    <span role="cell" className="quantity-pair">
                       <NumberInput
-                        label={`Mobile formula quantity for ${row.ingredient?.name}`}
-                        value={row.quantity}
+                        label={`Formula quantity ${ingredient?.name}`}
+                        disabled={isReadOnly}
+                        value={line.quantity}
                         onChange={(value) =>
-                          updateFormulaLine(row.id, "quantity", value)
+                          updateFormulaLine(recipe.id, line.id, { quantity: value })
                         }
                       />
                       <UnitSelect
-                        label={`Mobile formula unit for ${row.ingredient?.name}`}
-                        value={row.unit}
+                        label={`Formula unit ${ingredient?.name}`}
+                        disabled={isReadOnly}
+                        value={line.unit}
                         onChange={(value) =>
-                          updateFormulaLine(row.id, "unit", value)
+                          updateFormulaLine(recipe.id, line.id, { unit: value })
                         }
                       />
                     </span>
-                  </Field>
-                  <Field label="Wastage %">
-                    <NumberInput
-                      label={`Mobile wastage percentage for ${row.ingredient?.name}`}
-                      value={row.wastage}
-                      onChange={(value) =>
-                        updateFormulaLine(row.id, "wastage", value)
-                      }
-                    />
-                  </Field>
-                  <label className="check-row">
-                    <input
-                      type="radio"
-                      checked={row.isMain}
-                      onChange={() => setMainFormulaLine(row.id)}
-                    />
-                    Main ingredient
-                  </label>
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={row.optional}
-                      onChange={(event) =>
-                        updateFormulaLine(row.id, "optional", event.target.checked)
-                      }
-                    />
-                    Optional
-                  </label>
-                  <Field label="Notes">
-                    <input
-                      value={row.notes}
-                      onChange={(event) =>
-                        updateFormulaLine(row.id, "notes", event.target.value)
-                      }
-                    />
-                  </Field>
-                </div>
-              </details>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel" id="production">
-          <div className="section-title">
-            <div>
-              <h2>Production batch</h2>
-              <p>Actual quantities can override calculated required quantities.</p>
-            </div>
-            <button
-              type="button"
-              className="primary-button"
-              disabled={savingBatch}
-              onClick={() => simulateSave("batch")}
-            >
-              {savingBatch ? "Saving..." : "Save batch"}
-            </button>
-          </div>
-
-          <div className="form-grid four">
-            <Field label="Batch number" required>
-              <input
-                value={production.batchNumber}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    batchNumber: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Recipe">
-              <input value={`${recipe.name} ${recipe.version}`} readOnly />
-            </Field>
-            <Field label="Business">
-              <input
-                value={production.business}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    business: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Location">
-              <input
-                value={production.location}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    location: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Production area">
-              <input
-                value={production.productionArea}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    productionArea: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Responsible employee">
-              <input
-                value={production.responsible}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    responsible: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Status">
-              <select
-                value={production.status}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    status: event.target.value,
-                  }))
-                }
-              >
-                {statuses.map((status) => (
-                  <option key={status}>{status}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Quality rating">
-              <select
-                value={production.qualityRating}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    qualityRating: event.target.value,
-                  }))
-                }
-              >
-                <option value="1">1 - Poor</option>
-                <option value="2">2 - Fair</option>
-                <option value="3">3 - Good</option>
-                <option value="4">4 - Very good</option>
-                <option value="5">5 - Excellent</option>
-              </select>
-            </Field>
-            <Field label="Start date and time">
-              <input
-                type="datetime-local"
-                value={production.start}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    start: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="End date and time">
-              <input
-                type="datetime-local"
-                value={production.end}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    end: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Photos">
-              <input
-                value={production.photos}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    photos: event.target.value,
-                  }))
-                }
-                placeholder="Photo references"
-              />
-            </Field>
-            <Field label="Completed by">
-              <input
-                value={production.completedBy}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    completedBy: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Approved by">
-              <input
-                value={production.approvedBy}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    approvedBy: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Pre-production notes">
-              <textarea
-                value={production.preNotes}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    preNotes: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="During-production notes">
-              <textarea
-                value={production.duringNotes}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    duringNotes: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-            <Field label="Outcome notes">
-              <textarea
-                value={production.outcomeNotes}
-                onChange={(event) =>
-                  setProduction((current) => ({
-                    ...current,
-                    outcomeNotes: event.target.value,
-                  }))
-                }
-              />
-            </Field>
-          </div>
-
-          <div
-            className="sheet production-sheet"
-            role="table"
-            aria-label="Production ingredients"
-          >
-            <div className="sheet-head" role="row">
-              <span role="columnheader">Ingredient</span>
-              <span role="columnheader">Required</span>
-              <span role="columnheader">Actual</span>
-              <span role="columnheader">Variance</span>
-              <span role="columnheader">Expected cost</span>
-              <span role="columnheader">Actual cost</span>
-              <span role="columnheader">Cost var.</span>
-              <span role="columnheader">Notes</span>
-            </div>
-            {productionRows.map((row) => (
-              <div className="sheet-row" role="row" key={row.id}>
-                <span role="cell">
-                  <strong>{row.ingredient?.name}</strong>
-                  {row.isMain ? <small>Main</small> : null}
-                </span>
-                <span role="cell" className="numeric-cell">
-                  {formatNumber(row.requiredQuantity, row.unit === "kg" ? 3 : 1)}{" "}
-                  {row.unit}
-                </span>
-                <span role="cell" className="quantity-pair">
-                  <NumberInput
-                    label={`Actual quantity used for ${row.ingredient?.name}`}
-                    value={row.actualQuantity}
-                    onChange={(value) => updateUsage(row.id, { quantity: value })}
-                  />
-                  <UnitSelect
-                    label={`Actual unit for ${row.ingredient?.name}`}
-                    value={row.actualUnit}
-                    onChange={(value) => updateUsage(row.id, { unit: value })}
-                  />
-                </span>
-                <span
-                  role="cell"
-                  className={`numeric-cell ${
-                    Math.abs(row.variance) > 0.001 ? "warning-text" : ""
-                  }`}
-                >
-                  {formatNumber(row.variance, row.unit === "kg" ? 3 : 1)} {row.unit}
-                </span>
-                <span role="cell" className="numeric-cell">
-                  {formatCurrency(row.expectedCost)}
-                </span>
-                <span role="cell" className="numeric-cell strong-cell">
-                  {formatCurrency(row.actualCost)}
-                </span>
-                <span role="cell" className="numeric-cell">
-                  {formatCurrency(row.costVariance)}
-                </span>
-                <span role="cell">
-                  <input
-                    value={row.usageNotes}
-                    onChange={(event) =>
-                      updateUsage(row.id, { notes: event.target.value })
-                    }
-                    aria-label={`Production notes for ${row.ingredient?.name}`}
-                  />
-                </span>
-              </div>
-            ))}
-            <div className="sheet-total" role="row">
-              <span role="cell">Ingredient totals</span>
-              <span role="cell" />
-              <span role="cell" />
-              <span role="cell" />
-              <span role="cell" className="numeric-cell">
-                {formatCurrency(expectedIngredientCost)}
-              </span>
-              <span role="cell" className="numeric-cell">
-                {formatCurrency(actualIngredientCost)}
-              </span>
-              <span role="cell" className="numeric-cell">
-                {formatCurrency(actualIngredientCost - expectedIngredientCost)}
-              </span>
-              <span role="cell" />
-            </div>
-          </div>
-
-          <div className="mobile-records" aria-label="Production ingredients mobile">
-            {productionRows.map((row) => (
-              <details className="sheet-record" key={row.id}>
-                <summary>
-                  <span>
-                    <strong>{row.ingredient?.name}</strong>
-                    <small>
-                      Required {formatNumber(row.requiredQuantity, 2)} {row.unit}
-                    </small>
-                  </span>
-                  <span>{formatCurrency(row.actualCost)}</span>
-                </summary>
-                <div className="record-grid">
-                  <Field label="Actual quantity">
-                    <span className="quantity-pair">
+                    <span role="cell">
                       <NumberInput
-                        label={`Mobile actual quantity for ${row.ingredient?.name}`}
-                        value={row.actualQuantity}
-                        onChange={(value) => updateUsage(row.id, { quantity: value })}
-                      />
-                      <UnitSelect
-                        label={`Mobile actual unit for ${row.ingredient?.name}`}
-                        value={row.actualUnit}
-                        onChange={(value) => updateUsage(row.id, { unit: value })}
+                        label={`Wastage ${ingredient?.name}`}
+                        disabled={isReadOnly}
+                        value={line.wastage}
+                        onChange={(value) =>
+                          updateFormulaLine(recipe.id, line.id, { wastage: value })
+                        }
                       />
                     </span>
-                  </Field>
-                  <div className="record-metric">
-                    <span>Variance</span>
-                    <strong>
-                      {formatNumber(row.variance, 2)} {row.unit}
-                    </strong>
+                    <span role="cell" className="numeric-cell strong-cell">
+                      {formatCurrency(formulaLineCost(line, ingredientMap))}
+                    </span>
+                    <span role="cell" className="center-cell">
+                      <input
+                        type="radio"
+                        disabled={isReadOnly}
+                        checked={line.isMain}
+                        onChange={() => setMainFormulaLine(recipe.id, line.id)}
+                        aria-label={`Main ingredient ${ingredient?.name}`}
+                      />
+                    </span>
+                    <span role="cell">
+                      <input
+                        readOnly={isReadOnly}
+                        value={line.notes}
+                        onChange={(event) =>
+                          updateFormulaLine(recipe.id, line.id, {
+                            notes: event.target.value,
+                          })
+                        }
+                        aria-label={`Notes ${ingredient?.name}`}
+                      />
+                    </span>
+                    <span role="cell" className="action-cell">
+                      <label className="toggle-mini">
+                        <input
+                          type="checkbox"
+                          disabled={isReadOnly}
+                          checked={line.optional}
+                          onChange={(event) =>
+                            updateFormulaLine(recipe.id, line.id, {
+                              optional: event.target.checked,
+                            })
+                          }
+                        />
+                        Opt
+                      </label>
+                      {!isReadOnly ? (
+                        <button
+                          type="button"
+                          className="icon-button danger"
+                          title="Delete"
+                          onClick={() => removeFormulaLine(recipe.id, line.id)}
+                        >
+                          X
+                        </button>
+                      ) : null}
+                    </span>
                   </div>
-                  <div className="record-metric">
-                    <span>Expected cost</span>
-                    <strong>{formatCurrency(row.expectedCost)}</strong>
-                  </div>
-                  <Field label="Notes">
-                    <input
-                      value={row.usageNotes}
-                      onChange={(event) =>
-                        updateUsage(row.id, { notes: event.target.value })
-                      }
-                    />
-                  </Field>
-                </div>
-              </details>
-            ))}
+                );
+              })}
+            <div className="sheet-total" role="row">
+              <span role="cell">Base Formula Cost</span>
+              <span role="cell" />
+              <span role="cell" />
+              <span role="cell" />
+              <span role="cell" className="numeric-cell">{formatCurrency(formulaCost)}</span>
+              <span role="cell" />
+              <span role="cell" />
+              <span role="cell" />
+            </div>
           </div>
         </section>
 
         <section className="two-column-section">
-          <div className="panel">
+          <section className="panel">
             <div className="section-title">
               <div>
-                <h2>Yield</h2>
-                <p>Costing uses the final usable yield.</p>
+                <h2>Method</h2>
+                <p>Saved method steps are copied into each production batch.</p>
+              </div>
+              {!isReadOnly ? (
+                <button
+                  type="button"
+                  className="compact-button"
+                  onClick={() => addMethodStep(recipe.id)}
+                >
+                  + Step
+                </button>
+              ) : null}
+            </div>
+            <Field label="Method introduction">
+              <textarea
+                readOnly={isReadOnly}
+                value={recipe.methodIntro}
+                onChange={(event) =>
+                  updateRecipe(recipe.id, { methodIntro: event.target.value })
+                }
+              />
+            </Field>
+            <div className="method-list">
+              {recipe.methodSteps.map((step, index) => (
+                <article className="method-step" key={step.id}>
+                  <div className="step-index">{index + 1}</div>
+                  <div className="method-fields">
+                    <div className="form-grid two">
+                      <Field label="Step title">
+                        <input
+                          readOnly={isReadOnly}
+                          value={step.title}
+                          onChange={(event) =>
+                            updateMethodStep(recipe.id, step.id, {
+                              title: event.target.value,
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="Duration">
+                        <input
+                          readOnly={isReadOnly}
+                          value={step.duration}
+                          onChange={(event) =>
+                            updateMethodStep(recipe.id, step.id, {
+                              duration: event.target.value,
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="Temperature">
+                        <input
+                          readOnly={isReadOnly}
+                          value={step.temperature}
+                          onChange={(event) =>
+                            updateMethodStep(recipe.id, step.id, {
+                              temperature: event.target.value,
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="Equipment required">
+                        <input
+                          readOnly={isReadOnly}
+                          value={step.equipment}
+                          onChange={(event) =>
+                            updateMethodStep(recipe.id, step.id, {
+                              equipment: event.target.value,
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="Instructions">
+                        <textarea
+                          readOnly={isReadOnly}
+                          value={step.instructions}
+                          onChange={(event) =>
+                            updateMethodStep(recipe.id, step.id, {
+                              instructions: event.target.value,
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="Step notes">
+                        <input
+                          readOnly={isReadOnly}
+                          value={step.notes}
+                          onChange={(event) =>
+                            updateMethodStep(recipe.id, step.id, {
+                              notes: event.target.value,
+                            })
+                          }
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                  {!isReadOnly ? (
+                    <div className="step-actions">
+                      <button type="button" className="icon-button" onClick={() => moveMethodStep(recipe.id, step.id, -1)}>^</button>
+                      <button type="button" className="icon-button" onClick={() => moveMethodStep(recipe.id, step.id, 1)}>v</button>
+                      <button type="button" className="icon-button danger" onClick={() => removeMethodStep(recipe.id, step.id)}>X</button>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </section>
+          <section className="panel">
+            <div className="section-title">
+              <div>
+                <h2>Expected Yield and Cost</h2>
+                <p>Estimates only. Completed batches recalculate from actual yield.</p>
               </div>
             </div>
             <div className="form-grid two">
-              <Field label="Starting yield">
+              <Field label="Base starting quantity">
                 <span className="quantity-pair">
-                  <NumberInput
-                    label="Starting yield"
-                    value={production.startingYield}
-                    onChange={(value) =>
-                      setProduction((current) => ({
-                        ...current,
-                        startingYield: value,
-                      }))
-                    }
-                  />
-                  <UnitSelect
-                    label="Starting yield unit"
-                    value={production.startingYieldUnit}
-                    onChange={(value) =>
-                      setProduction((current) => ({
-                        ...current,
-                        startingYieldUnit: value,
-                      }))
-                    }
-                  />
+                  <NumberInput disabled={isReadOnly} value={recipe.baseStartingQuantity} label="Base starting quantity" onChange={(value) => updateRecipe(recipe.id, { baseStartingQuantity: value })} />
+                  <UnitSelect disabled={isReadOnly} value={recipe.baseStartingUnit} label="Base starting unit" onChange={(value) => updateRecipe(recipe.id, { baseStartingUnit: value })} />
                 </span>
               </Field>
-              <Field label="End yield">
+              <Field label="Expected completed yield">
                 <span className="quantity-pair">
-                  <NumberInput
-                    label="End yield"
-                    value={production.endYield}
-                    onChange={(value) =>
-                      setProduction((current) => ({ ...current, endYield: value }))
-                    }
-                  />
-                  <UnitSelect
-                    label="End yield unit"
-                    value={production.endYieldUnit}
-                    onChange={(value) =>
-                      setProduction((current) => ({
-                        ...current,
-                        endYieldUnit: value,
-                      }))
-                    }
-                  />
+                  <NumberInput disabled={isReadOnly} value={recipe.expectedYield} label="Expected yield" onChange={(value) => updateRecipe(recipe.id, { expectedYield: value })} />
+                  <UnitSelect disabled={isReadOnly} value={recipe.yieldUnit} label="Expected yield unit" onChange={(value) => updateRecipe(recipe.id, { yieldUnit: value })} />
                 </span>
               </Field>
-            </div>
-            <div className="metric-grid">
-              <div>
-                <span>Yield percentage</span>
-                <strong>{formatNumber(yieldPercentage, 2)}%</strong>
-              </div>
-              <div>
-                <span>Production loss</span>
-                <strong>
-                  {formatNumber(productionLoss, 3)} {production.endYieldUnit}
-                </strong>
-              </div>
-              <div>
-                <span>Loss percentage</span>
-                <strong>{formatNumber(lossPercentage, 2)}%</strong>
-              </div>
-              <div>
-                <span>Cost per kg</span>
-                <strong>{formatCurrency(costPerKg)}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="section-title">
-              <div>
-                <h2>Pricing</h2>
-                <p>Markup and gross margin use separate calculations.</p>
-              </div>
-            </div>
-            <div className="form-grid two">
+              <Field label="Default additional cost">
+                <NumberInput disabled={isReadOnly} value={recipe.defaultAdditionalCost} label="Default additional cost" onChange={(value) => updateRecipe(recipe.id, { defaultAdditionalCost: value })} />
+              </Field>
+              <Field label="Default pricing %">
+                <NumberInput disabled={isReadOnly} value={recipe.pricingPercentage} label="Default pricing percentage" onChange={(value) => updateRecipe(recipe.id, { pricingPercentage: value })} />
+              </Field>
               <Field label="Pricing method">
                 <select
-                  value={pricing.method}
+                  disabled={isReadOnly}
+                  value={recipe.pricingMethod}
                   onChange={(event) =>
-                    setPricing((current) => ({
-                      ...current,
-                      method: event.target.value,
-                    }))
+                    updateRecipe(recipe.id, {
+                      pricingMethod: event.target.value as Recipe["pricingMethod"],
+                    })
                   }
                 >
-                  <option>Markup</option>
                   <option>Gross Margin</option>
+                  <option>Markup</option>
                 </select>
               </Field>
-              <Field label="Profit %">
-                <NumberInput
-                  label="Pricing percentage"
-                  value={pricing.percentage}
-                  onChange={(value) =>
-                    setPricing((current) => ({
-                      ...current,
-                      percentage: value,
-                    }))
-                  }
-                />
-              </Field>
-              <Field label="Selling unit">
+              <Field label="Default selling unit">
                 <select
-                  value={pricing.sellingUnit}
+                  disabled={isReadOnly}
+                  value={recipe.defaultSellingUnit}
                   onChange={(event) =>
-                    setPricing((current) => ({
-                      ...current,
-                      sellingUnit: event.target.value,
-                    }))
+                    updateRecipe(recipe.id, { defaultSellingUnit: event.target.value })
                   }
                 >
                   <option>Per kg</option>
                   <option>Per 500 g</option>
                   <option>Per 250 g</option>
                   <option>Per 100 g</option>
-                  <option>Per portion</option>
                   <option>Per packet</option>
+                  <option>Per portion</option>
                   <option>Per item</option>
-                  <option>Custom quantity</option>
                 </select>
               </Field>
-              <Field label="Custom quantity">
-                <span className="quantity-pair">
-                  <NumberInput
-                    label="Custom selling quantity"
-                    value={pricing.customQuantity}
-                    onChange={(value) =>
-                      setPricing((current) => ({
-                        ...current,
-                        customQuantity: value,
-                      }))
-                    }
-                  />
-                  <UnitSelect
-                    label="Custom selling unit"
-                    value={pricing.customUnit}
-                    onChange={(value) =>
-                      setPricing((current) => ({
-                        ...current,
-                        customUnit: value,
-                      }))
-                    }
-                  />
-                </span>
-              </Field>
             </div>
-            <div className="metric-grid pricing-metrics">
-              <div>
-                <span>Cost per selling unit</span>
-                <strong>{formatCurrency(sellingUnitCost)}</strong>
-              </div>
-              <div>
-                <span>Selling price</span>
-                <strong>{formatCurrency(sellingPrice)}</strong>
-              </div>
-              <div>
-                <span>Unit profit</span>
-                <strong>{formatCurrency(unitProfit)}</strong>
-              </div>
-              <div>
-                <span>Effective margin</span>
-                <strong>{formatNumber(effectiveMargin, 2)}%</strong>
-              </div>
+            <div className="metric-grid yield-metrics">
+              <div><span>Expected yield %</span><strong>{formatNumber(yieldPercentage, 2)}%</strong></div>
+              <div><span>Expected loss</span><strong>{formatNumber(expectedLoss, 3)} {recipe.baseStartingUnit}</strong></div>
+              <div><span>Expected total cost</span><strong>{formatCurrency(expectedTotal)}</strong></div>
+              <div><span>Cost per yield unit</span><strong>{formatCurrency(costPerYield)}</strong></div>
+              <div><span>Default selling unit</span><strong>{recipe.defaultSellingUnit}</strong></div>
+              <div><span>Expected selling price</span><strong>{formatCurrency(estimatedPrice)}</strong></div>
             </div>
-          </div>
+          </section>
         </section>
+      </section>
+    );
+  }
 
+  function renderProductionsSummary() {
+    return (
+      <section className="page-stack">
         <section className="panel">
           <div className="section-title">
             <div>
-              <h2>Additional costs</h2>
-              <p>Labour, utilities, packaging and overheads are included in total cost.</p>
-            </div>
-            <button type="button" className="compact-button" onClick={addCostLine}>
-              + Cost
-            </button>
-          </div>
-          <div className="sheet cost-sheet" role="table" aria-label="Additional costs">
-            <div className="sheet-head" role="row">
-              <span role="columnheader">Type</span>
-              <span role="columnheader">Description</span>
-              <span role="columnheader">Qty</span>
-              <span role="columnheader">Rate</span>
-              <span role="columnheader">Total</span>
-              <span role="columnheader">Notes</span>
-              <span role="columnheader">Action</span>
-            </div>
-            {additionalCosts.map((row) => (
-              <div className="sheet-row" role="row" key={row.id}>
-                <span role="cell">
-                  <select
-                    value={row.type}
-                    onChange={(event) =>
-                      setAdditionalCosts((current) =>
-                        current.map((item) =>
-                          item.id === row.id
-                            ? { ...item, type: event.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                  >
-                    {costTypes.map((type) => (
-                      <option key={type}>{type}</option>
-                    ))}
-                  </select>
-                </span>
-                <span role="cell">
-                  <input
-                    value={row.description}
-                    onChange={(event) =>
-                      setAdditionalCosts((current) =>
-                        current.map((item) =>
-                          item.id === row.id
-                            ? { ...item, description: event.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                  />
-                </span>
-                <span role="cell">
-                  <NumberInput
-                    label={`Quantity for ${row.type}`}
-                    value={row.quantity}
-                    onChange={(value) =>
-                      setAdditionalCosts((current) =>
-                        current.map((item) =>
-                          item.id === row.id ? { ...item, quantity: value } : item,
-                        ),
-                      )
-                    }
-                  />
-                </span>
-                <span role="cell">
-                  <NumberInput
-                    label={`Rate for ${row.type}`}
-                    value={row.rate}
-                    onChange={(value) =>
-                      setAdditionalCosts((current) =>
-                        current.map((item) =>
-                          item.id === row.id ? { ...item, rate: value } : item,
-                        ),
-                      )
-                    }
-                  />
-                </span>
-                <span role="cell" className="numeric-cell strong-cell">
-                  {formatCurrency(row.quantity * row.rate)}
-                </span>
-                <span role="cell">
-                  <input
-                    value={row.notes}
-                    onChange={(event) =>
-                      setAdditionalCosts((current) =>
-                        current.map((item) =>
-                          item.id === row.id
-                            ? { ...item, notes: event.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                  />
-                </span>
-                <span role="cell" className="action-cell">
-                  <button
-                    type="button"
-                    className="icon-button danger"
-                    aria-label={`Delete ${row.type} cost`}
-                    title="Delete"
-                    onClick={() =>
-                      setAdditionalCosts((current) =>
-                        current.filter((item) => item.id !== row.id),
-                      )
-                    }
-                  >
-                    X
-                  </button>
-                </span>
-              </div>
-            ))}
-            <div className="sheet-total" role="row">
-              <span role="cell">Additional cost total</span>
-              <span role="cell" />
-              <span role="cell" />
-              <span role="cell" />
-              <span role="cell" className="numeric-cell">
-                {formatCurrency(additionalCostTotal)}
-              </span>
-              <span role="cell" />
-              <span role="cell" />
+              <h2>Productions</h2>
+              <p>Summary page with sub-navigation for production work.</p>
             </div>
           </div>
-        </section>
-
-        <section className="panel" id="ingredients">
-          <div className="section-title">
-            <div>
-              <h2>Ingredient library</h2>
-              <p>Purchase costs convert automatically into recipe base unit costs.</p>
-            </div>
-            <button type="button" className="compact-button" onClick={addIngredient}>
-              + Ingredient
-            </button>
-          </div>
-          <div
-            className="sheet ingredient-sheet"
-            role="table"
-            aria-label="Ingredient library"
-          >
-            <div className="sheet-head" role="row">
-              <span role="columnheader">Ingredient</span>
-              <span role="columnheader">Category</span>
-              <span role="columnheader">Purchase qty</span>
-              <span role="columnheader">Cost</span>
-              <span role="columnheader">Base unit</span>
-              <span role="columnheader">Cost/base</span>
-              <span role="columnheader">Supplier</span>
-              <span role="columnheader">SKU</span>
-              <span role="columnheader">Active</span>
-            </div>
-            {ingredients.map((ingredient) => (
-              <div className="sheet-row" role="row" key={ingredient.id}>
-                <span role="cell">
-                  <input
-                    value={ingredient.name}
-                    onChange={(event) =>
-                      updateIngredient(ingredient.id, "name", event.target.value)
-                    }
-                  />
-                </span>
-                <span role="cell">
-                  <input
-                    value={ingredient.category}
-                    onChange={(event) =>
-                      updateIngredient(ingredient.id, "category", event.target.value)
-                    }
-                  />
-                </span>
-                <span role="cell" className="quantity-pair">
-                  <NumberInput
-                    label={`Purchase quantity for ${ingredient.name}`}
-                    value={ingredient.purchaseQuantity}
-                    onChange={(value) =>
-                      updateIngredient(ingredient.id, "purchaseQuantity", value)
-                    }
-                  />
-                  <UnitSelect
-                    label={`Purchase unit for ${ingredient.name}`}
-                    value={ingredient.purchaseUnit}
-                    onChange={(value) =>
-                      updateIngredient(ingredient.id, "purchaseUnit", value)
-                    }
-                  />
-                </span>
-                <span role="cell">
-                  <NumberInput
-                    label={`Purchase cost for ${ingredient.name}`}
-                    value={ingredient.purchaseCost}
-                    onChange={(value) =>
-                      updateIngredient(ingredient.id, "purchaseCost", value)
-                    }
-                  />
-                </span>
-                <span role="cell">
-                  <UnitSelect
-                    label={`Recipe base unit for ${ingredient.name}`}
-                    value={ingredient.baseUnit}
-                    onChange={(value) =>
-                      updateIngredient(ingredient.id, "baseUnit", value)
-                    }
-                  />
-                </span>
-                <span role="cell" className="numeric-cell strong-cell">
-                  {formatCurrency(ingredientBaseCost(ingredient))} /{" "}
-                  {ingredient.baseUnit}
-                </span>
-                <span role="cell">
-                  <input
-                    value={ingredient.supplier}
-                    onChange={(event) =>
-                      updateIngredient(ingredient.id, "supplier", event.target.value)
-                    }
-                  />
-                </span>
-                <span role="cell">
-                  <input
-                    value={ingredient.sku}
-                    onChange={(event) =>
-                      updateIngredient(ingredient.id, "sku", event.target.value)
-                    }
-                  />
-                </span>
-                <span role="cell" className="center-cell">
-                  <input
-                    type="checkbox"
-                    checked={ingredient.active}
-                    onChange={(event) =>
-                      updateIngredient(ingredient.id, "active", event.target.checked)
-                    }
-                    aria-label={`${ingredient.name} active status`}
-                  />
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div className="mobile-records" aria-label="Ingredient library mobile">
-            {ingredients.map((ingredient) => (
-              <details className="sheet-record" key={ingredient.id}>
-                <summary>
-                  <span>
-                    <strong>{ingredient.name}</strong>
-                    <small>{ingredient.category}</small>
-                  </span>
-                  <span>
-                    {formatCurrency(ingredientBaseCost(ingredient))} /{" "}
-                    {ingredient.baseUnit}
-                  </span>
-                </summary>
-                <div className="record-grid">
-                  <Field label="Purchase">
-                    <span className="quantity-pair">
-                      <NumberInput
-                        label={`Mobile purchase quantity for ${ingredient.name}`}
-                        value={ingredient.purchaseQuantity}
-                        onChange={(value) =>
-                          updateIngredient(
-                            ingredient.id,
-                            "purchaseQuantity",
-                            value,
-                          )
-                        }
-                      />
-                      <UnitSelect
-                        label={`Mobile purchase unit for ${ingredient.name}`}
-                        value={ingredient.purchaseUnit}
-                        onChange={(value) =>
-                          updateIngredient(ingredient.id, "purchaseUnit", value)
-                        }
-                      />
-                    </span>
-                  </Field>
-                  <Field label="Supplier">
-                    <input
-                      value={ingredient.supplier}
-                      onChange={(event) =>
-                        updateIngredient(
-                          ingredient.id,
-                          "supplier",
-                          event.target.value,
-                        )
-                      }
-                    />
-                  </Field>
-                  <Field label="SKU">
-                    <input
-                      value={ingredient.sku}
-                      onChange={(event) =>
-                        updateIngredient(ingredient.id, "sku", event.target.value)
-                      }
-                    />
-                  </Field>
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={ingredient.active}
-                      onChange={(event) =>
-                        updateIngredient(
-                          ingredient.id,
-                          "active",
-                          event.target.checked,
-                        )
-                      }
-                    />
-                    Active
-                  </label>
-                </div>
-              </details>
+          <div className="subnav-grid">
+            {[
+              ["New Production", "/productions/new", "Select a saved recipe and start a batch."],
+              ["In Progress", "/productions/in-progress", "Work on active production batches."],
+              ["Completed", "/productions/completed", "Read-only completed production history."],
+            ].map(([title, href, copy]) => (
+              <button key={href} type="button" className="subnav-tile" onClick={() => navigate(href)}>
+                <strong>{title}</strong>
+                <small>{copy}</small>
+              </button>
             ))}
           </div>
         </section>
+      </section>
+    );
+  }
 
-        <section className="panel" id="method">
+  function renderNewProduction() {
+    const recipeFromQuery = query.get("recipeId");
+    if (recipeFromQuery && recipeFromQuery !== productionDraft.recipeId) {
+      window.setTimeout(() =>
+        setProductionDraft((current) => ({ ...current, recipeId: recipeFromQuery })),
+      );
+    }
+    const mainLine = recipeMainLine(selectedProductionRecipe);
+    const scalingFactor =
+      mainLine && mainLine.quantity > 0
+        ? convertQuantity(
+            productionDraft.mainQuantity,
+            productionDraft.mainUnit,
+            mainLine.unit,
+          ) / mainLine.quantity
+        : 1;
+    return (
+      <section className="page-stack">
+        <section className="panel">
           <div className="section-title">
             <div>
-              <h2>Production method</h2>
-              <p>Drag steps to reorder, or use the compact move controls.</p>
+              <h2>New Production</h2>
+              <p>Select a saved recipe, confirm the version, then start the batch.</p>
             </div>
             <button
               type="button"
-              className="compact-button"
-              onClick={() =>
-                setMethodSteps((current) => [
-                  ...current,
-                  {
-                    id: makeId("step"),
-                    title: "New step",
-                    instructions: "",
-                    duration: "",
-                    temperature: "",
-                    equipment: "",
-                    image: "",
-                    notes: "",
-                  },
-                ])
-              }
+              className="primary-button"
+              disabled={startingProduction}
+              onClick={startProduction}
             >
-              + Step
+              {startingProduction ? "Starting..." : "Start Production"}
             </button>
           </div>
-          <div className="method-list">
-            {methodSteps.map((step, index) => (
-              <article
-                className="method-step"
-                key={step.id}
-                draggable
-                onDragStart={(event: DragEvent<HTMLElement>) => {
-                  setDraggingStepId(step.id);
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                onDragOver={(event: DragEvent<HTMLElement>) => event.preventDefault()}
-                onDrop={() => dropStep(step.id)}
+          <div className="form-grid four">
+            <Field label="Saved recipe" required>
+              <select
+                value={productionDraft.recipeId}
+                onChange={(event) =>
+                  setProductionDraft((current) => ({
+                    ...current,
+                    recipeId: event.target.value,
+                  }))
+                }
               >
+                {recipes.map((recipeOption) => (
+                  <option key={recipeOption.id} value={recipeOption.id}>
+                    {recipeOption.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Recipe version"><input readOnly value={`v${selectedProductionRecipe.version}`} /></Field>
+            <Field label="Main quantity used">
+              <span className="quantity-pair">
+                <NumberInput label="Main quantity" value={productionDraft.mainQuantity} onChange={(value) => setProductionDraft((current) => ({ ...current, mainQuantity: value }))} />
+                <UnitSelect label="Main unit" value={productionDraft.mainUnit} onChange={(value) => setProductionDraft((current) => ({ ...current, mainUnit: value }))} />
+              </span>
+            </Field>
+            <Field label="Start date and time">
+              <input type="datetime-local" value={productionDraft.startDate} onChange={(event) => setProductionDraft((current) => ({ ...current, startDate: event.target.value }))} />
+            </Field>
+            <Field label="Responsible user"><input value={productionDraft.responsible} onChange={(event) => setProductionDraft((current) => ({ ...current, responsible: event.target.value }))} /></Field>
+            <Field label="Location"><input value={productionDraft.location} onChange={(event) => setProductionDraft((current) => ({ ...current, location: event.target.value }))} /></Field>
+            <Field label="Current notes"><textarea value={productionDraft.notes} onChange={(event) => setProductionDraft((current) => ({ ...current, notes: event.target.value }))} /></Field>
+          </div>
+          <div className="calculation-strip inline-strip">
+            <span>Scaling Factor</span>
+            <strong>{formatNumber(scalingFactor, 3)}x</strong>
+            <small>
+              {formatNumber(productionDraft.mainQuantity, 3)} {productionDraft.mainUnit} /{" "}
+              {formatNumber(mainLine?.quantity ?? 0, 3)} {mainLine?.unit}
+            </small>
+          </div>
+        </section>
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>Calculated production ingredients</h2>
+              <p>Actual quantity can be adjusted without changing the recipe formula.</p>
+            </div>
+          </div>
+          {renderProductionLinesTable(productionDraftLines, { readOnly: true })}
+        </section>
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>Production method snapshot</h2>
+              <p>This method version is saved into the batch when started.</p>
+            </div>
+          </div>
+          <div className="method-list">
+            {selectedProductionRecipe.methodSteps.map((step, index) => (
+              <article className="method-step" key={step.id}>
                 <div className="step-index">{index + 1}</div>
-                <div className="method-fields">
-                  <div className="form-grid four">
-                    <Field label="Step title">
-                      <input
-                        value={step.title}
-                        onChange={(event) =>
-                          setMethodSteps((current) =>
-                            current.map((item) =>
-                              item.id === step.id
-                                ? { ...item, title: event.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Duration">
-                      <input
-                        value={step.duration}
-                        onChange={(event) =>
-                          setMethodSteps((current) =>
-                            current.map((item) =>
-                              item.id === step.id
-                                ? { ...item, duration: event.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Temperature">
-                      <input
-                        value={step.temperature}
-                        onChange={(event) =>
-                          setMethodSteps((current) =>
-                            current.map((item) =>
-                              item.id === step.id
-                                ? { ...item, temperature: event.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Equipment">
-                      <input
-                        value={step.equipment}
-                        onChange={(event) =>
-                          setMethodSteps((current) =>
-                            current.map((item) =>
-                              item.id === step.id
-                                ? { ...item, equipment: event.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Instructions">
-                      <textarea
-                        value={step.instructions}
-                        onChange={(event) =>
-                          setMethodSteps((current) =>
-                            current.map((item) =>
-                              item.id === step.id
-                                ? { ...item, instructions: event.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Image">
-                      <input
-                        value={step.image}
-                        onChange={(event) =>
-                          setMethodSteps((current) =>
-                            current.map((item) =>
-                              item.id === step.id
-                                ? { ...item, image: event.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Notes">
-                      <input
-                        value={step.notes}
-                        onChange={(event) =>
-                          setMethodSteps((current) =>
-                            current.map((item) =>
-                              item.id === step.id
-                                ? { ...item, notes: event.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                  </div>
-                </div>
-                <div className="step-actions">
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Move ${step.title} up`}
-                    title="Move up"
-                    onClick={() => moveStep(step.id, -1)}
-                  >
-                    ^
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Move ${step.title} down`}
-                    title="Move down"
-                    onClick={() => moveStep(step.id, 1)}
-                  >
-                    v
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-button danger"
-                    aria-label={`Delete ${step.title}`}
-                    title="Delete"
-                    onClick={() =>
-                      setMethodSteps((current) =>
-                        current.filter((item) => item.id !== step.id),
-                      )
-                    }
-                  >
-                    X
-                  </button>
+                <div>
+                  <strong>{step.title}</strong>
+                  <p>{step.instructions}</p>
+                  <small>{step.duration} / {step.temperature} / {step.equipment}</small>
                 </div>
               </article>
             ))}
           </div>
         </section>
+      </section>
+    );
+  }
 
-        <section className="panel" id="reports">
+  function renderProductionLinesTable(
+    lines: ProductionLine[],
+    options: { productionId?: string; readOnly?: boolean } = {},
+  ) {
+    const isReadOnly = options.readOnly ?? false;
+    return (
+      <div className="sheet production-line-sheet" role="table">
+        <div className="sheet-head" role="row">
+          <span role="columnheader">Ingredient</span>
+          <span role="columnheader">Base formula</span>
+          <span role="columnheader">Required</span>
+          <span role="columnheader">Actual</span>
+          <span role="columnheader">Variance</span>
+          <span role="columnheader">Expected cost</span>
+          <span role="columnheader">Actual cost</span>
+          <span role="columnheader">Notes</span>
+        </div>
+        {lines.map((line) => {
+          const ingredient = ingredientMap.get(line.ingredientId);
+          const variance =
+            convertQuantity(line.actualQuantity, line.actualUnit, line.unit) -
+            line.requiredQuantity;
+          return (
+            <div className="sheet-row" role="row" key={line.id}>
+              <span role="cell"><strong>{ingredient?.name}</strong></span>
+              <span role="cell" className="numeric-cell">{formatNumber(line.baseQuantity, 3)} {line.unit}</span>
+              <span role="cell" className="numeric-cell">{formatNumber(line.requiredQuantity, 3)} {line.unit}</span>
+              <span
+                role="cell"
+                className={options.productionId && !isReadOnly ? "quantity-pair" : "numeric-cell"}
+              >
+                {options.productionId && !isReadOnly ? (
+                  <>
+                    <NumberInput
+                      label={`Actual quantity ${ingredient?.name}`}
+                      value={line.actualQuantity}
+                      onChange={(value) =>
+                        updateProductionLine(options.productionId!, line.id, {
+                          actualQuantity: value,
+                        })
+                      }
+                    />
+                    <UnitSelect
+                      label={`Actual unit ${ingredient?.name}`}
+                      value={line.actualUnit}
+                      onChange={(value) =>
+                        updateProductionLine(options.productionId!, line.id, {
+                          actualUnit: value,
+                        })
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    {formatNumber(line.actualQuantity, 3)} {line.actualUnit}
+                  </>
+                )}
+              </span>
+              <span role="cell" className="numeric-cell">{formatNumber(variance, 3)} {line.unit}</span>
+              <span role="cell" className="numeric-cell">{formatCurrency(line.expectedCost)}</span>
+              <span role="cell" className="numeric-cell strong-cell">{formatCurrency(line.actualCost)}</span>
+              <span role="cell" className="muted-cell">
+                {options.productionId && !isReadOnly ? (
+                  <input
+                    value={line.notes}
+                    aria-label={`Production line notes ${ingredient?.name}`}
+                    onChange={(event) =>
+                      updateProductionLine(options.productionId!, line.id, {
+                        notes: event.target.value,
+                      })
+                    }
+                  />
+                ) : (
+                  line.notes
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderInProgress() {
+    return (
+      <section className="page-stack">
+        <section className="panel">
           <div className="section-title">
             <div>
-              <h2>Reports</h2>
-              <p>Compact views for yield, costing and profitability review.</p>
+              <h2>In Progress Productions</h2>
+              <p>Working area for active production batches.</p>
             </div>
           </div>
-          <div className="report-grid">
-            <div className="report-cell">
-              <span>Total cost</span>
-              <strong>{formatCurrency(totalProductionCost)}</strong>
-              <small>Ingredients plus additional production costs.</small>
+          <div className="sheet production-summary-sheet" role="table">
+            <div className="sheet-head" role="row">
+              <span role="columnheader">Batch</span>
+              <span role="columnheader">Recipe</span>
+              <span role="columnheader">Main qty</span>
+              <span role="columnheader">Start</span>
+              <span role="columnheader">Elapsed</span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Responsible</span>
+              <span role="columnheader">Location</span>
+              <span role="columnheader">Expected</span>
+              <span role="columnheader">Notes</span>
+              <span role="columnheader">Actions</span>
             </div>
-            <div className="report-cell">
-              <span>Final usable yield</span>
-              <strong>
-                {formatNumber(production.endYield, 3)} {production.endYieldUnit}
-              </strong>
-              <small>Costing is based on end yield.</small>
-            </div>
-            <div className="report-cell">
-              <span>Cost variance</span>
-              <strong>
-                {formatCurrency(actualIngredientCost - expectedIngredientCost)}
-              </strong>
-              <small>Actual ingredient cost against scaled expected cost.</small>
-            </div>
-            <div className="report-cell">
-              <span>Suggested price</span>
-              <strong>{formatCurrency(sellingPrice)}</strong>
-              <small>
-                {pricing.method} at {formatNumber(pricing.percentage, 1)}%.
-              </small>
-            </div>
+            {activeProductions.map((production) => (
+              <div className="sheet-row" role="row" key={production.id}>
+                <span role="cell"><strong>{production.batchNumber}</strong></span>
+                <span role="cell" className="muted-cell">{production.recipeName}</span>
+                <span role="cell" className="numeric-cell">{formatNumber(production.mainQuantity, 3)} {production.mainUnit}</span>
+                <span role="cell" className="muted-cell">{production.startDate}</span>
+                <span role="cell">1 d 3 h</span>
+                <span role="cell">
+                  <select
+                    value={production.status}
+                    onChange={(event) => updateProduction(production.id, { status: event.target.value as ProductionBatch["status"] })}
+                  >
+                    <option>In Progress</option>
+                    <option>Resting</option>
+                    <option>Drying</option>
+                    <option>Awaiting Review</option>
+                    <option>On Hold</option>
+                  </select>
+                </span>
+                <span role="cell">{production.responsible}</span>
+                <span role="cell">{production.location}</span>
+                <span role="cell">{production.expectedCompletion}</span>
+                <span role="cell" className="muted-cell">{production.notes}</span>
+                <span role="cell" className="action-cell wide-actions">
+                  <button type="button" className="compact-button" onClick={() => navigate(`/productions/${production.id}`)}>Open Production</button>
+                  <button type="button" className="compact-button" onClick={() => showToast("info", "Progress note added.")}>Add Note</button>
+                  <button type="button" className="compact-button" onClick={() => navigate(`/productions/${production.id}`)}>Complete Production</button>
+                </span>
+              </div>
+            ))}
+            {activeProductions.length === 0 ? <div className="sheet-empty">No active productions</div> : null}
           </div>
         </section>
-
-        <div className="action-strip" aria-label="Sticky actions">
-          <span>
-            {recipe.code} / {production.batchNumber}
-          </span>
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() =>
-              showToast(
-                yieldPercentage >= 80 ? "success" : "warning",
-                yieldPercentage >= 80
-                  ? "Batch calculations are ready for review."
-                  : "Yield is below the expected threshold.",
-              )
-            }
-          >
-            Review totals
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={savingRecipe || savingBatch}
-            onClick={() => simulateSave("batch")}
-          >
-            Complete
-          </button>
-        </div>
       </section>
-    </main>
-  );
+    );
+  }
+
+  function renderProductionDetail() {
+    const productionId = pathname.split("/")[2];
+    const production = productions.find((item) => item.id === productionId);
+    if (!production) {
+      return (
+        <section className="panel">
+          <h2>Production not found</h2>
+        </section>
+      );
+    }
+    const isCompleted = production.status === "Completed";
+    const ingredientCost = production.lines.reduce((sum, line) => sum + line.actualCost, 0);
+    const additionalCost = production.additionalCosts.reduce((sum, cost) => sum + cost.quantity * cost.rate, 0);
+    return (
+      <section className="page-stack">
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>{production.batchNumber}</h2>
+              <p>{production.recipeName} v{production.recipeVersion}</p>
+            </div>
+            <strong className="status-chip">{production.status}</strong>
+          </div>
+          <div className="metric-grid">
+            <div><span>Main quantity</span><strong>{formatNumber(production.mainQuantity, 3)} {production.mainUnit}</strong></div>
+            <div><span>Ingredient cost</span><strong>{formatCurrency(ingredientCost)}</strong></div>
+            <div><span>Additional cost</span><strong>{formatCurrency(additionalCost)}</strong></div>
+            <div><span>Current total</span><strong>{formatCurrency(ingredientCost + additionalCost)}</strong></div>
+          </div>
+        </section>
+        <section className="panel">
+          <div className="section-title"><div><h2>Ingredient snapshot</h2><p>Required quantities and cost snapshots saved when started.</p></div></div>
+          {renderProductionLinesTable(production.lines, {
+            productionId: production.id,
+            readOnly: isCompleted,
+          })}
+        </section>
+        <section className="two-column-section">
+          <section className="panel">
+            <div className="section-title"><div><h2>Method snapshot</h2><p>Read from the recipe version used at start.</p></div></div>
+            <div className="method-list">
+              {production.methodSnapshot.map((step, index) => (
+                <article className="method-step" key={step.id}>
+                  <div className="step-index">{index + 1}</div>
+                  <div><strong>{step.title}</strong><p>{step.instructions}</p></div>
+                </article>
+              ))}
+            </div>
+          </section>
+          <section className="panel">
+            <div className="section-title">
+              <div>
+                <h2>Completion</h2>
+                <p>
+                  {isCompleted
+                    ? "Completed batches are read-only and use actual completed yield."
+                    : "Required before moving to Completed."}
+                </p>
+              </div>
+            </div>
+            <div className="form-grid two">
+              <Field label="End date and time" required><input readOnly={isCompleted} type="datetime-local" value={production.endDate} onChange={(event) => updateProduction(production.id, { endDate: event.target.value })} /></Field>
+              <Field label="Starting yield" required><NumberInput disabled={isCompleted} value={production.startingYield} label="Starting yield" onChange={(value) => updateProduction(production.id, { startingYield: value })} /></Field>
+              <Field label="Completed yield" required><NumberInput disabled={isCompleted} value={production.completedYield} label="Completed yield" onChange={(value) => updateProduction(production.id, { completedYield: value })} /></Field>
+              <Field label="Yield unit"><UnitSelect disabled={isCompleted} value={production.yieldUnit} label="Completed yield unit" onChange={(value) => updateProduction(production.id, { yieldUnit: value })} /></Field>
+              <Field label="Quality rating" required><input readOnly={isCompleted} value={production.qualityRating} onChange={(event) => updateProduction(production.id, { qualityRating: event.target.value })} /></Field>
+              <Field label="Completed by" required><input readOnly={isCompleted} value={production.completedBy} onChange={(event) => updateProduction(production.id, { completedBy: event.target.value })} /></Field>
+              <Field label="Outcome notes"><textarea readOnly={isCompleted} value={production.outcomeNotes} onChange={(event) => updateProduction(production.id, { outcomeNotes: event.target.value })} /></Field>
+            </div>
+            {isCompleted ? (
+              <button type="button" className="ghost-button block-action" onClick={() => navigate("/productions/completed")}>Back to Completed</button>
+            ) : (
+              <button type="button" className="primary-button block-action" onClick={() => completeProduction(production)}>Complete Production</button>
+            )}
+          </section>
+        </section>
+      </section>
+    );
+  }
+
+  function renderCompletedProductions() {
+    return (
+      <section className="page-stack">
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>Completed Productions</h2>
+              <p>Read-only production history using final actual yield and cost snapshots.</p>
+            </div>
+          </div>
+          <div className="sheet completed-sheet" role="table">
+            <div className="sheet-head" role="row">
+              <span role="columnheader">Batch</span>
+              <span role="columnheader">Recipe</span>
+              <span role="columnheader">Start</span>
+              <span role="columnheader">End</span>
+              <span role="columnheader">Yield</span>
+              <span role="columnheader">Loss</span>
+              <span role="columnheader">Total cost</span>
+              <span role="columnheader">Cost/yield</span>
+              <span role="columnheader">Selling price</span>
+              <span role="columnheader">Margin</span>
+              <span role="columnheader">Actions</span>
+            </div>
+            {completedProductions.map((production) => {
+              const yieldPct = production.startingYield > 0 ? (production.completedYield / production.startingYield) * 100 : 0;
+              const loss = Math.max(production.startingYield - production.completedYield, 0);
+              const profit = (production.finalSellingPrice ?? 0) - (production.finalCostPerYield ?? 0);
+              const margin = production.finalSellingPrice ? (profit / production.finalSellingPrice) * 100 : 0;
+              return (
+                <div className="sheet-row" role="row" key={production.id}>
+                  <span role="cell"><strong>{production.batchNumber}</strong></span>
+                  <span role="cell" className="muted-cell">{production.recipeName} v{production.recipeVersion}</span>
+                  <span role="cell">{production.startDate}</span>
+                  <span role="cell">{production.endDate}</span>
+                  <span role="cell" className="numeric-cell">{formatNumber(yieldPct, 2)}%</span>
+                  <span role="cell" className="numeric-cell">{formatNumber(loss, 3)} {production.yieldUnit}</span>
+                  <span role="cell" className="numeric-cell strong-cell">{formatCurrency(production.finalTotalCost ?? 0)}</span>
+                  <span role="cell" className="numeric-cell">{formatCurrency(production.finalCostPerYield ?? 0)}</span>
+                  <span role="cell" className="numeric-cell">{formatCurrency(production.finalSellingPrice ?? 0)}</span>
+                  <span role="cell" className="numeric-cell">{formatNumber(margin, 2)}%</span>
+                  <span role="cell" className="action-cell wide-actions">
+                    <button type="button" className="compact-button" onClick={() => navigate(`/productions/${production.id}`)}>View</button>
+                    <button type="button" className="compact-button" onClick={() => showToast("info", "Print prepared.")}>Print</button>
+                    <button type="button" className="compact-button" onClick={() => showToast("info", "Export prepared.")}>Export</button>
+                    <button type="button" className="compact-button" onClick={() => { setProductionDraft((current) => ({ ...current, recipeId: production.recipeId })); navigate("/productions/new"); }}>Duplicate as New</button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  function renderReports() {
+    const totalCompletedCost = completedProductions.reduce(
+      (sum, production) => sum + (production.finalTotalCost ?? 0),
+      0,
+    );
+    return (
+      <section className="page-stack">
+        <section className="panel">
+          <div className="section-title"><div><h2>Reports</h2><p>Yield, costing and profitability summaries.</p></div></div>
+          <div className="report-grid">
+            <div className="report-cell"><span>Completed cost</span><strong>{formatCurrency(totalCompletedCost)}</strong><small>Actual completed production costs.</small></div>
+            <div className="report-cell"><span>Average cost per kg</span><strong>{formatCurrency(completedProductions[0]?.finalCostPerYield ?? 0)}</strong><small>Uses completed yield.</small></div>
+            <div className="report-cell"><span>Active batches</span><strong>{activeProductions.length}</strong><small>Not yet completed.</small></div>
+            <div className="report-cell"><span>Recipe count</span><strong>{recipes.length}</strong><small>Current formulas.</small></div>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  function renderSettings() {
+    return (
+      <section className="page-stack">
+        <section className="panel">
+          <div className="section-title"><div><h2>Settings</h2><p>Lookup data and costing policies.</p></div></div>
+          <div className="settings-grid">
+            <div><strong>Units of measure</strong><small>{units.join(", ")}</small></div>
+            <div><strong>Production statuses</strong><small>Draft, In Progress, Resting, Drying, Awaiting Review, On Hold, Completed, Cancelled</small></div>
+            <div><strong>Historical costing</strong><small>Completed productions retain formula, method and ingredient cost snapshots.</small></div>
+            <div><strong>Pricing methods</strong><small>Markup and Gross Margin are calculated separately.</small></div>
+          </div>
+        </section>
+      </section>
+    );
+  }
+}
+
+function pageTitleForPath(pathname: string) {
+  if (pathname === "/" || pathname === "/dashboard") {
+    return {
+      title: "Dashboard",
+      description: "A compact overview of recipe, ingredient and production activity.",
+    };
+  }
+  if (pathname === "/ingredients") {
+    return {
+      title: "Ingredients Bible",
+      description: "Maintain linked ingredients and purchase-cost calculations.",
+    };
+  }
+  if (pathname.startsWith("/recipes/")) {
+    return {
+      title: pathname.endsWith("/edit") || pathname === "/recipes/new" ? "Recipe Builder" : "Recipe Detail",
+      description: "Build the base formula, method, expected yield and cost estimate.",
+    };
+  }
+  if (pathname === "/recipes") {
+    return {
+      title: "Recipes",
+      description: "Create, view, edit, duplicate and archive production formulas.",
+    };
+  }
+  if (pathname.startsWith("/productions")) {
+    return {
+      title:
+        pathname === "/productions/new"
+          ? "New Production"
+          : pathname === "/productions/in-progress"
+            ? "In Progress Productions"
+            : pathname === "/productions/completed"
+              ? "Completed Productions"
+              : "Productions",
+      description: "Start batches, track work in progress and retain completed snapshots.",
+    };
+  }
+  if (pathname === "/reports") {
+    return {
+      title: "Reports",
+      description: "Review yield, costing and profitability using actual completed values.",
+    };
+  }
+  return {
+    title: "Settings",
+    description: "Manage lookup values and application-level costing rules.",
+  };
+}
+
+function isActiveNav(pathname: string, href: string) {
+  if (href === "/dashboard") return pathname === "/" || pathname === "/dashboard";
+  return pathname === href || pathname.startsWith(`${href}/`);
 }

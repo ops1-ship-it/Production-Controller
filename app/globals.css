@@ -105,16 +105,18 @@ a {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 188px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 188px;
   min-height: 100vh;
 }
 
 .sidebar {
   position: sticky;
   top: 0;
+  grid-column: 2;
+  grid-row: 1;
   align-self: start;
   height: 100vh;
-  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
   background: #fbfbfc;
   padding: 14px 10px;
 }
@@ -158,6 +160,9 @@ a {
 }
 
 .sidebar a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   border-radius: 6px;
   color: var(--muted);
   padding: 7px 8px;
@@ -171,7 +176,28 @@ a {
   color: var(--foreground);
 }
 
+.sidebar a.active {
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.nav-icon {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .workspace {
+  grid-column: 1;
+  grid-row: 1;
   min-width: 0;
   padding: 16px;
   padding-bottom: 72px;
@@ -272,6 +298,11 @@ a {
 
 .compact-button {
   font-weight: 650;
+}
+
+.page-stack {
+  display: grid;
+  gap: 12px;
 }
 
 .hero-grid {
@@ -498,9 +529,9 @@ a {
 .formula-sheet .sheet-row,
 .formula-sheet .sheet-total {
   grid-template-columns:
-    minmax(138px, 1.45fr) minmax(96px, 0.95fr) minmax(92px, 0.8fr)
-    minmax(136px, 1fr) minmax(66px, 0.55fr) minmax(90px, 0.75fr)
-    46px minmax(110px, 1fr) 116px;
+    minmax(132px, 1.45fr) minmax(96px, 0.85fr) minmax(136px, 1fr)
+    minmax(66px, 0.55fr) minmax(90px, 0.75fr) 46px
+    minmax(110px, 1fr) 104px;
 }
 
 .recipe-sheet .sheet-head,
@@ -534,6 +565,50 @@ a {
     minmax(130px, 1.25fr) minmax(96px, 0.85fr) minmax(140px, 1fr)
     minmax(82px, 0.7fr) minmax(74px, 0.58fr) minmax(104px, 0.85fr)
     minmax(112px, 1fr) minmax(98px, 0.8fr) 56px;
+}
+
+.ingredient-bible-sheet .sheet-head,
+.ingredient-bible-sheet .sheet-row {
+  grid-template-columns:
+    minmax(116px, 1.2fr) minmax(82px, 0.72fr) minmax(96px, 0.86fr)
+    minmax(88px, 0.76fr) minmax(132px, 1fr) minmax(74px, 0.62fr)
+    minmax(68px, 0.55fr) minmax(86px, 0.72fr) minmax(62px, 0.48fr)
+    minmax(68px, 0.56fr) 88px;
+}
+
+.recipes-list-sheet .sheet-head,
+.recipes-list-sheet .sheet-row {
+  grid-template-columns:
+    minmax(118px, 1.2fr) minmax(76px, 0.62fr) minmax(78px, 0.62fr)
+    minmax(96px, 0.82fr) minmax(74px, 0.56fr) minmax(72px, 0.58fr)
+    minmax(82px, 0.7fr) minmax(82px, 0.72fr) 56px 64px
+    minmax(82px, 0.72fr) minmax(330px, 2fr);
+}
+
+.production-line-sheet .sheet-head,
+.production-line-sheet .sheet-row {
+  grid-template-columns:
+    minmax(120px, 1.2fr) minmax(88px, 0.7fr) minmax(94px, 0.78fr)
+    minmax(92px, 0.74fr) minmax(82px, 0.68fr) minmax(88px, 0.72fr)
+    minmax(88px, 0.72fr) minmax(110px, 1fr);
+}
+
+.production-summary-sheet .sheet-head,
+.production-summary-sheet .sheet-row {
+  grid-template-columns:
+    minmax(82px, 0.75fr) minmax(118px, 1.1fr) minmax(80px, 0.66fr)
+    minmax(108px, 0.9fr) minmax(60px, 0.52fr) minmax(118px, 0.9fr)
+    minmax(82px, 0.72fr) minmax(80px, 0.7fr) minmax(104px, 0.86fr)
+    minmax(110px, 1fr) minmax(210px, 1.6fr);
+}
+
+.completed-sheet .sheet-head,
+.completed-sheet .sheet-row {
+  grid-template-columns:
+    minmax(82px, 0.72fr) minmax(124px, 1.08fr) minmax(104px, 0.84fr)
+    minmax(104px, 0.84fr) minmax(70px, 0.56fr) minmax(76px, 0.6fr)
+    minmax(86px, 0.68fr) minmax(86px, 0.68fr) minmax(88px, 0.7fr)
+    minmax(66px, 0.54fr) minmax(230px, 1.75fr);
 }
 
 .sheet-head {
@@ -614,6 +689,17 @@ a {
 .center-cell,
 .action-cell {
   justify-content: center;
+}
+
+.wide-actions {
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.wide-actions .compact-button {
+  height: 26px;
+  padding-inline: 6px;
+  font-size: 11px;
 }
 
 .strong-cell {
@@ -707,6 +793,65 @@ a {
 .report-cell small {
   color: var(--faint);
   line-height: 1.3;
+}
+
+.summary-grid,
+.settings-grid,
+.subnav-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.summary-cell,
+.settings-grid div,
+.subnav-tile {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--foreground);
+  padding: 10px;
+  text-align: left;
+}
+
+.summary-cell:last-child,
+.settings-grid div:last-child,
+.subnav-tile:last-child {
+  border-right: 0;
+}
+
+.summary-cell span,
+.settings-grid small,
+.subnav-tile small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.summary-cell strong,
+.subnav-tile strong {
+  font-size: 16px;
+}
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(120px, 0.45fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.inline-strip {
+  margin-top: 10px;
+}
+
+.block-action {
+  width: 100%;
+  margin-top: 10px;
 }
 
 .pricing-metrics div:nth-child(2) strong,
@@ -867,6 +1012,10 @@ a {
   backdrop-filter: blur(8px);
 }
 
+.mobile-bottom-nav {
+  display: none;
+}
+
 .action-strip span {
   margin-right: auto;
   overflow: hidden;
@@ -983,38 +1132,43 @@ a {
 
 @media (max-width: 980px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) 58px;
   }
 
   .sidebar {
     position: sticky;
     top: 0;
     z-index: 9;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    height: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+    display: block;
+    height: 100vh;
+    border-left: 1px solid var(--line);
+    border-bottom: 0;
     padding: 8px;
     overflow: hidden;
   }
 
   .brand-block {
-    flex: 0 0 auto;
-    border: 0;
+    justify-content: center;
+    border-bottom: 1px solid var(--line);
     padding: 0;
+    padding-bottom: 8px;
+  }
+
+  .brand-block span:last-child,
+  .sidebar a span:last-child {
+    display: none;
   }
 
   .sidebar nav {
-    display: flex;
-    min-width: 0;
-    margin: 0;
-    overflow: auto;
+    display: grid;
+    justify-items: center;
+    margin-top: 10px;
+    overflow: visible;
   }
 
   .sidebar a {
-    white-space: nowrap;
+    justify-content: center;
+    padding: 7px;
   }
 
   .workspace {
@@ -1050,12 +1204,49 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .sheet {
+  .ingredient-bible-sheet,
+  .recipes-list-sheet {
     display: none;
+  }
+
+  .sheet-head {
+    display: none;
+  }
+
+  .sheet-row,
+  .sheet-total {
+    grid-template-columns: 1fr !important;
+  }
+
+  .sheet-head span,
+  .sheet-row span,
+  .sheet-total span {
+    border-right: 0;
+    justify-content: space-between;
   }
 
   .mobile-records {
     display: block;
+  }
+
+  .filter-bar,
+  .summary-grid,
+  .settings-grid,
+  .subnav-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-cell,
+  .settings-grid div,
+  .subnav-tile {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .summary-cell:last-child,
+  .settings-grid div:last-child,
+  .subnav-tile:last-child {
+    border-bottom: 0;
   }
 }
 
@@ -1064,8 +1255,17 @@ a {
     font-size: 12px;
   }
 
+  .app-shell {
+    display: block;
+  }
+
   .workspace {
     padding-inline: 8px;
+    padding-bottom: 82px;
+  }
+
+  .sidebar {
+    display: none;
   }
 
   .scale-control,
@@ -1115,5 +1315,39 @@ a {
 
   .action-strip button {
     flex: 1 1 110px;
+  }
+
+  .mobile-bottom-nav {
+    position: fixed;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    z-index: 22;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 8px 28px rgba(22, 24, 29, 0.1);
+    padding: 4px;
+    backdrop-filter: blur(8px);
+  }
+
+  .mobile-bottom-nav a {
+    display: grid;
+    min-width: 0;
+    min-height: 36px;
+    place-items: center;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+    text-align: center;
+  }
+
+  .mobile-bottom-nav a.active {
+    background: var(--blue-soft);
+    color: var(--blue);
   }
 }

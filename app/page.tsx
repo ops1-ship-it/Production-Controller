@@ -1,10 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import {
+  downloadBlob,
+  fileStamp,
+  ingredientExportColumns,
+  ingredientImportColumns,
+  makeCsvBlob,
+  makeXlsxBlob,
+  parseIngredientFile,
+  supportedImportUnits,
+  type IngredientFileRow,
+} from "@/src/lib/ingredients/files";
 import { createSupabaseBrowserClient } from "@/src/lib/supabase/client";
 import { normalizeSupabaseError } from "@/src/lib/supabase/errors";
-import type { Tables, TablesUpdate } from "@/src/lib/supabase/types";
+import type { Json, Tables, TablesUpdate } from "@/src/lib/supabase/types";
 
 type Unit =
   | "kg"
@@ -173,6 +184,42 @@ type BusinessContext = {
   userEmail: string;
 };
 
+type IngredientLookup = {
+  id: string;
+  name: string;
+};
+
+type IngredientImportMode = "add-only" | "add-update";
+
+type MissingLookupMode = "create" | "reject";
+
+type IngredientImportResult =
+  | "Ready to Add"
+  | "Ready to Update"
+  | "Duplicate"
+  | "Invalid"
+  | "Skipped";
+
+type IngredientImportDraftRow = {
+  rowNumber: number;
+  values: IngredientFileRow;
+  name: string;
+  category: string;
+  supplier: string;
+  sku: string;
+  purchaseQuantity: number;
+  purchaseUnit: Unit | "";
+  purchaseCost: number;
+  baseUnit: Unit | "";
+  wastePercentage: number;
+  active: boolean;
+  notes: string;
+  costPerBaseUnit: number;
+  result: IngredientImportResult;
+  message: string;
+  existingId?: string;
+};
+
 const units: Unit[] = [
   "kg",
   "g",
@@ -185,6 +232,8 @@ const units: Unit[] = [
   "case",
   "custom",
 ];
+
+const importUnits = [...supportedImportUnits] as Unit[];
 
 const additionalCostTypes = [
   "Labour",
@@ -220,6 +269,216 @@ function convertQuantity(quantity: number, from: Unit, to: Unit) {
   }
 
   return quantity;
+}
+
+function normalizeTextKey(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalisedName(value: IngredientFileRow[string]) {
+  return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+function parseImportNumber(value: IngredientFileRow[string]) {
+  const text = String(value ?? "")
+    .replace(/[Rr]/g, "")
+    .replace(/\s/g, "")
+    .replaceAll(",", "");
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function normalizeImportUnit(value: IngredientFileRow[string]): Unit | "" {
+  const text = String(value ?? "").trim().toLowerCase();
+  return importUnits.find((unit) => unit.toLowerCase() === text) ?? "";
+}
+
+function statusToActive(value: IngredientFileRow[string]) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (text === "active") return true;
+  if (text === "inactive") return false;
+  return null;
+}
+
+function strictConvertImportQuantity(quantity: number, from: Unit, to: Unit) {
+  if (!Number.isFinite(quantity)) return null;
+  if (from === to) return quantity;
+  if (from === "kg" && to === "g") return quantity * 1000;
+  if (from === "g" && to === "kg") return null;
+  if (from === "L" && to === "ml") return quantity * 1000;
+  if (from === "ml" && to === "L") return null;
+  return null;
+}
+
+function calculateImportUnitCost(
+  purchaseQuantity: number,
+  purchaseUnit: Unit,
+  purchaseCost: number,
+  baseUnit: Unit,
+) {
+  const converted = strictConvertImportQuantity(
+    purchaseQuantity,
+    purchaseUnit,
+    baseUnit,
+  );
+  return converted && converted > 0 ? purchaseCost / converted : 0;
+}
+
+function buildIngredientImportPreview({
+  rawRows,
+  ingredients,
+  categories,
+  suppliers,
+  importMode,
+  missingLookupMode,
+}: {
+  rawRows: IngredientFileRow[];
+  ingredients: Ingredient[];
+  categories: IngredientLookup[];
+  suppliers: IngredientLookup[];
+  importMode: IngredientImportMode;
+  missingLookupMode: MissingLookupMode;
+}) {
+  const categoryMap = new Map(categories.map((item) => [normalizeTextKey(item.name), item]));
+  const supplierMap = new Map(suppliers.map((item) => [normalizeTextKey(item.name), item]));
+  const existingBySku = new Map(
+    ingredients
+      .filter((ingredient) => ingredient.sku.trim())
+      .map((ingredient) => [normalizeTextKey(ingredient.sku), ingredient]),
+  );
+  const existingByName = new Map(
+    ingredients.map((ingredient) => [normalizeTextKey(ingredient.name), ingredient]),
+  );
+  const seenImportKeys = new Set<string>();
+
+  return rawRows.map((row, index) => {
+    const name = normalisedName(row["Ingredient Name"]);
+    const category = normalisedName(row.Category);
+    const supplier = normalisedName(row.Supplier);
+    const sku = normalisedName(row.SKU);
+    const purchaseQuantity = parseImportNumber(row["Purchase Quantity"]);
+    const purchaseUnit = normalizeImportUnit(row["Purchase UOM"]);
+    const purchaseCost = parseImportNumber(row["Purchase Cost"]);
+    const baseUnit = normalizeImportUnit(row["Recipe Base UOM"]);
+    const wastePercentage = parseImportNumber(row["Waste Percentage"]);
+    const active = statusToActive(row.Status);
+    const notes = String(row.Notes ?? "").trim();
+    const errors: string[] = [];
+
+    if (!name) errors.push("Ingredient Name is required.");
+    if (!Number.isFinite(purchaseQuantity) || purchaseQuantity <= 0) {
+      errors.push("Purchase Quantity must be greater than zero.");
+    }
+    if (!Number.isFinite(purchaseCost) || purchaseCost < 0) {
+      errors.push("Purchase Cost cannot be negative.");
+    }
+    if (!purchaseUnit) errors.push("Purchase UOM is not supported.");
+    if (!baseUnit) errors.push("Recipe Base UOM is not supported.");
+    if (purchaseUnit && baseUnit && strictConvertImportQuantity(1, purchaseUnit, baseUnit) === null) {
+      errors.push("Purchase UOM and Recipe Base UOM are not compatible.");
+    }
+    if (!Number.isFinite(wastePercentage) || wastePercentage < 0 || wastePercentage > 100) {
+      errors.push("Waste Percentage must be between 0 and 100.");
+    }
+    if (active === null) errors.push("Status must be Active or Inactive.");
+    if (category.length > 120) errors.push("Category text is too long.");
+    if (supplier.length > 160) errors.push("Supplier text is too long.");
+    if (missingLookupMode === "reject" && category && !categoryMap.has(normalizeTextKey(category))) {
+      errors.push("Category does not exist.");
+    }
+    if (missingLookupMode === "reject" && supplier && !supplierMap.has(normalizeTextKey(supplier))) {
+      errors.push("Supplier does not exist.");
+    }
+
+    const importKey = sku ? `sku:${normalizeTextKey(sku)}` : `name:${normalizeTextKey(name)}`;
+    const duplicateInFile = Boolean(name) && seenImportKeys.has(importKey);
+    if (name) seenImportKeys.add(importKey);
+
+    const existing = sku
+      ? existingBySku.get(normalizeTextKey(sku))
+      : existingByName.get(normalizeTextKey(name));
+    const costPerBaseUnit =
+      purchaseUnit && baseUnit && Number.isFinite(purchaseQuantity) && Number.isFinite(purchaseCost)
+        ? calculateImportUnitCost(purchaseQuantity, purchaseUnit, purchaseCost, baseUnit)
+        : 0;
+
+    let result: IngredientImportResult = "Ready to Add";
+    let message = "Validated.";
+    if (errors.length) {
+      result = "Invalid";
+      message = errors.join(" ");
+    } else if (duplicateInFile) {
+      result = "Duplicate";
+      message = "Duplicate row in this import file.";
+    } else if (existing && importMode === "add-only") {
+      result = "Duplicate";
+      message = sku
+        ? "Existing ingredient matches this SKU."
+        : "Existing ingredient matches this name.";
+    } else if (existing && importMode === "add-update") {
+      result = "Ready to Update";
+      message = "Existing ingredient will be updated.";
+    }
+
+    return {
+      rowNumber: index + 2,
+      values: row,
+      name,
+      category,
+      supplier,
+      sku,
+      purchaseQuantity: Number.isFinite(purchaseQuantity) ? purchaseQuantity : 0,
+      purchaseUnit,
+      purchaseCost: Number.isFinite(purchaseCost) ? purchaseCost : 0,
+      baseUnit,
+      wastePercentage: Number.isFinite(wastePercentage) ? wastePercentage : 0,
+      active: active ?? true,
+      notes,
+      costPerBaseUnit,
+      result,
+      message,
+      existingId: existing?.id,
+    } satisfies IngredientImportDraftRow;
+  });
+}
+
+function ingredientImportSummary(rows: IngredientImportDraftRow[]) {
+  return {
+    totalRows: rows.length,
+    readyToAdd: rows.filter((row) => row.result === "Ready to Add").length,
+    readyToUpdate: rows.filter((row) => row.result === "Ready to Update").length,
+    duplicates: rows.filter((row) => row.result === "Duplicate").length,
+    invalidRows: rows.filter((row) => row.result === "Invalid").length,
+    skippedRows: rows.filter((row) => row.result === "Skipped").length,
+  };
+}
+
+function ingredientExportRow(ingredient: Ingredient): IngredientFileRow {
+  return {
+    "Ingredient Name": ingredient.name,
+    Category: ingredient.category,
+    Supplier: ingredient.supplier,
+    SKU: ingredient.sku,
+    "Purchase Quantity": ingredient.purchaseQuantity,
+    "Purchase UOM": ingredient.purchaseUnit,
+    "Purchase Cost": ingredient.purchaseCost,
+    "Recipe Base UOM": ingredient.baseUnit,
+    "Cost Per Base Unit": Number(ingredientUnitCost(ingredient).toFixed(4)),
+    "Waste Percentage": ingredient.defaultWastage,
+    Status: ingredient.active ? "Active" : "Inactive",
+    Notes: ingredient.notes,
+  };
+}
+
+function importErrorReportRow(row: IngredientImportDraftRow): IngredientFileRow {
+  return {
+    "Original Row Number": row.rowNumber,
+    ...Object.fromEntries(
+      ingredientImportColumns.map((column) => [column, row.values[column] ?? ""]),
+    ),
+    "Import Result": row.result,
+    "Validation Message": row.message,
+  };
 }
 
 function ingredientUnitCost(ingredient: Ingredient) {
@@ -729,12 +988,24 @@ export default function RecipeCostApp({
   const [businessContext, setBusinessContext] = useState<BusinessContext | null>(
     null,
   );
+  const [ingredientCategories, setIngredientCategories] = useState<IngredientLookup[]>([]);
+  const [ingredientSuppliers, setIngredientSuppliers] = useState<IngredientLookup[]>([]);
   const [authEmail, setAuthEmail] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [mutationLabel, setMutationLabel] = useState("");
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [startingProduction, setStartingProduction] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importMode, setImportMode] =
+    useState<IngredientImportMode>("add-only");
+  const [missingLookupMode, setMissingLookupMode] =
+    useState<MissingLookupMode>("create");
+  const [importFileName, setImportFileName] = useState("");
+  const [importRawRows, setImportRawRows] = useState<IngredientFileRow[]>([]);
+  const [importProcessing, setImportProcessing] = useState(false);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const [productionDraft, setProductionDraft] = useState({
     recipeId: "",
     mainQuantity: 1,
@@ -813,6 +1084,28 @@ export default function RecipeCostApp({
     [activeFilter, categoryFilter, ingredientSearch, ingredients, supplierFilter],
   );
 
+  const importRows = useMemo(
+    () =>
+      importRawRows.length
+        ? buildIngredientImportPreview({
+            rawRows: importRawRows,
+            ingredients,
+            categories: ingredientCategories,
+            suppliers: ingredientSuppliers,
+            importMode,
+            missingLookupMode,
+          })
+        : [],
+    [
+      importMode,
+      importRawRows,
+      ingredients,
+      ingredientCategories,
+      ingredientSuppliers,
+      missingLookupMode,
+    ],
+  );
+
   const productionDraftLines = useMemo(
     () =>
       selectedProductionRecipe
@@ -853,6 +1146,8 @@ export default function RecipeCostApp({
     setIngredients(emptyAppData.ingredients);
     setRecipes(emptyAppData.recipes);
     setProductions(emptyAppData.productions);
+    setIngredientCategories([]);
+    setIngredientSuppliers([]);
     setActiveRecipeId("");
     setProductionDraft((current) => ({ ...current, recipeId: "" }));
   }, []);
@@ -925,6 +1220,8 @@ export default function RecipeCostApp({
 
       const [
         ingredientsResult,
+        categoriesResult,
+        suppliersResult,
         recipesResult,
         versionsResult,
         productionResult,
@@ -933,6 +1230,16 @@ export default function RecipeCostApp({
           .from("ingredients")
           .select("*, ingredient_categories(name), suppliers(name)")
           .eq("business_id", businessId)
+          .order("name", { ascending: true }),
+        supabase
+          .from("ingredient_categories")
+          .select("id, name")
+          .or(`business_id.eq.${businessId},business_id.is.null`)
+          .order("name", { ascending: true }),
+        supabase
+          .from("suppliers")
+          .select("id, name")
+          .or(`business_id.eq.${businessId},business_id.is.null`)
           .order("name", { ascending: true }),
         supabase
           .from("recipes")
@@ -953,11 +1260,15 @@ export default function RecipeCostApp({
       ]);
 
       if (ingredientsResult.error) throw ingredientsResult.error;
+      if (categoriesResult.error) throw categoriesResult.error;
+      if (suppliersResult.error) throw suppliersResult.error;
       if (recipesResult.error) throw recipesResult.error;
       if (versionsResult.error) throw versionsResult.error;
       if (productionResult.error) throw productionResult.error;
 
       const ingredientRows = (ingredientsResult.data ?? []) as IngredientSelect[];
+      const categoryRows = (categoriesResult.data ?? []) as IngredientLookup[];
+      const supplierRows = (suppliersResult.data ?? []) as IngredientLookup[];
       const recipeRowsFromDb = recipesResult.data ?? [];
       const currentVersions = (versionsResult.data ?? []).filter((version) =>
         recipeRowsFromDb.some((recipe) => recipe.id === version.recipe_id),
@@ -1046,6 +1357,8 @@ export default function RecipeCostApp({
       });
 
       setIngredients(ingredientRows.map(mapIngredient));
+      setIngredientCategories(categoryRows);
+      setIngredientSuppliers(supplierRows);
       setRecipes(mappedRecipes);
       setProductions(mappedProductions);
       setBusinessContext({
@@ -1158,6 +1471,421 @@ export default function RecipeCostApp({
     return businessContext;
   };
 
+  const downloadCurrentIngredientsCsv = () => {
+    const rows = filteredIngredients.map(ingredientExportRow);
+    downloadBlob(
+      makeCsvBlob(rows, ingredientExportColumns),
+      `ingredients-list-${fileStamp()}.csv`,
+    );
+    setExportMenuOpen(false);
+    showToast("success", "Current ingredient list exported as CSV.");
+  };
+
+  const downloadCurrentIngredientsXlsx = () => {
+    const rows = filteredIngredients.map(ingredientExportRow);
+    downloadBlob(
+      makeXlsxBlob([
+        {
+          name: "Ingredients",
+          rows: [
+            [...ingredientExportColumns],
+            ...rows.map((row) =>
+              ingredientExportColumns.map((column) => row[column] ?? ""),
+            ),
+          ],
+          widths: [22, 16, 18, 16, 16, 13, 14, 15, 17, 16, 12, 28],
+          freezeHeader: true,
+          autoFilter: true,
+          currencyColumns: [6],
+          currency4Columns: [8],
+          numericColumns: [4, 9],
+        },
+      ]),
+      `ingredients-list-${fileStamp()}.xlsx`,
+    );
+    setExportMenuOpen(false);
+    showToast("success", "Current ingredient list exported as XLSX.");
+  };
+
+  const templateExampleRow: IngredientFileRow = {
+    "Ingredient Name": "Silverside",
+    Category: "Meat",
+    Supplier: "Karoo Butchery",
+    SKU: "MEAT-SILV-5KG",
+    "Purchase Quantity": 5,
+    "Purchase UOM": "kg",
+    "Purchase Cost": 685,
+    "Recipe Base UOM": "g",
+    "Waste Percentage": 0,
+    Status: "Active",
+    Notes: "Beef silverside for biltong production",
+  };
+
+  const downloadIngredientTemplateCsv = () => {
+    downloadBlob(
+      makeCsvBlob([templateExampleRow], ingredientImportColumns),
+      "ingredients-import-template.csv",
+    );
+    setExportMenuOpen(false);
+    showToast("success", "CSV import template downloaded.");
+  };
+
+  const downloadIngredientTemplateXlsx = () => {
+    downloadBlob(
+      makeXlsxBlob([
+        {
+          name: "Ingredients Import",
+          rows: [
+            [...ingredientImportColumns],
+            ingredientImportColumns.map((column) => templateExampleRow[column] ?? ""),
+          ],
+          widths: [22, 16, 18, 16, 16, 13, 14, 15, 16, 12, 34],
+          freezeHeader: true,
+          autoFilter: true,
+          currencyColumns: [6],
+          numericColumns: [4, 8],
+          dropdowns: {
+            5: importUnits,
+            7: importUnits,
+            9: ["Active", "Inactive"],
+          },
+        },
+        {
+          name: "Instructions",
+          rows: [
+            ["Instruction"],
+            ["Ingredient Name is required."],
+            ["Purchase Quantity must be greater than zero."],
+            ["Purchase Cost cannot be negative."],
+            [`Supported UOM values: ${importUnits.join(", ")}.`],
+            ["Recipe Base UOM must be compatible with Purchase UOM."],
+            ["Waste Percentage must be between 0 and 100."],
+            ["Status must be Active or Inactive."],
+            ["SKU should be unique within the business."],
+            ["Cost Per Base Unit is calculated automatically."],
+            ["Existing ingredients may be updated according to the selected import mode."],
+          ],
+          widths: [86],
+          freezeHeader: true,
+        },
+      ]),
+      "ingredients-import-template.xlsx",
+    );
+    setExportMenuOpen(false);
+    showToast("success", "XLSX import template downloaded.");
+  };
+
+  const openIngredientImportDialog = () => {
+    setImportDialogOpen(true);
+    setExportMenuOpen(false);
+  };
+
+  const clearIngredientImport = () => {
+    setImportFileName("");
+    setImportRawRows([]);
+    if (importFileInputRef.current) importFileInputRef.current.value = "";
+  };
+
+  const handleIngredientFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImportProcessing(true);
+    try {
+      const rows = await parseIngredientFile(file);
+      if (!rows.length) {
+        throw new Error("No ingredient rows were found in the selected file.");
+      }
+      const missingColumns = ingredientImportColumns.filter(
+        (column) => !(column in rows[0]),
+      );
+      if (missingColumns.length) {
+        throw new Error(`Missing columns: ${missingColumns.join(", ")}.`);
+      }
+      setImportFileName(file.name);
+      setImportRawRows(rows);
+      showToast("success", `${rows.length} ingredient rows loaded for preview.`);
+    } catch (error) {
+      clearIngredientImport();
+      showToast("failed", normalizeSupabaseError(error));
+    } finally {
+      setImportProcessing(false);
+    }
+  };
+
+  const exportIngredientErrorReportCsv = () => {
+    const rows = importRows
+      .filter((row) => ["Duplicate", "Invalid", "Skipped"].includes(row.result))
+      .map(importErrorReportRow);
+    downloadBlob(
+      makeCsvBlob(rows, [
+        "Original Row Number",
+        ...ingredientImportColumns,
+        "Import Result",
+        "Validation Message",
+      ]),
+      `ingredient-import-errors-${fileStamp()}.csv`,
+    );
+  };
+
+  const exportIngredientErrorReportXlsx = () => {
+    const rows = importRows
+      .filter((row) => ["Duplicate", "Invalid", "Skipped"].includes(row.result))
+      .map(importErrorReportRow);
+    const columns = [
+      "Original Row Number",
+      ...ingredientImportColumns,
+      "Import Result",
+      "Validation Message",
+    ];
+    downloadBlob(
+      makeXlsxBlob([
+        {
+          name: "Ingredient Import Errors",
+          rows: [columns, ...rows.map((row) => columns.map((column) => row[column] ?? ""))],
+          widths: [18, 22, 16, 18, 16, 16, 13, 14, 15, 16, 12, 30, 16, 38],
+          freezeHeader: true,
+          autoFilter: true,
+        },
+      ]),
+      `ingredient-import-errors-${fileStamp()}.xlsx`,
+    );
+  };
+
+  const confirmIngredientImport = async () => {
+    const rowsToImport = importRows.filter((row) =>
+      ["Ready to Add", "Ready to Update"].includes(row.result),
+    );
+    if (!rowsToImport.length) {
+      showToast("failed", "No valid ingredient rows are ready to import.");
+      return;
+    }
+
+    setImportProcessing(true);
+    try {
+      const context = requireBusinessContext();
+      const supabase = createSupabaseBrowserClient();
+      const [categoryResult, supplierResult] = await Promise.all([
+        supabase
+          .from("ingredient_categories")
+          .select("id, name")
+          .eq("business_id", context.businessId),
+        supabase
+          .from("suppliers")
+          .select("id, name")
+          .eq("business_id", context.businessId),
+      ]);
+      if (categoryResult.error) throw categoryResult.error;
+      if (supplierResult.error) throw supplierResult.error;
+
+      const categoryMap = new Map(
+        ((categoryResult.data ?? []) as IngredientLookup[]).map((category) => [
+          normalizeTextKey(category.name),
+          category,
+        ]),
+      );
+      const supplierMap = new Map(
+        ((supplierResult.data ?? []) as IngredientLookup[]).map((supplier) => [
+          normalizeTextKey(supplier.name),
+          supplier,
+        ]),
+      );
+
+      if (missingLookupMode === "create") {
+        const missingCategoryNames = Array.from(
+          new Map(
+            rowsToImport
+              .map((row) => row.category)
+              .filter((name) => name && !categoryMap.has(normalizeTextKey(name)))
+              .map((name) => [normalizeTextKey(name), name]),
+          ).values(),
+        );
+        const missingSupplierNames = Array.from(
+          new Map(
+            rowsToImport
+              .map((row) => row.supplier)
+              .filter((name) => name && !supplierMap.has(normalizeTextKey(name)))
+              .map((name) => [normalizeTextKey(name), name]),
+          ).values(),
+        );
+
+        if (missingCategoryNames.length) {
+          const { data, error } = await supabase
+            .from("ingredient_categories")
+            .insert(
+              missingCategoryNames.map((name) => ({
+                business_id: context.businessId,
+                name,
+              })),
+            )
+            .select("id, name");
+          if (error) throw error;
+          ((data ?? []) as IngredientLookup[]).forEach((category) =>
+            categoryMap.set(normalizeTextKey(category.name), category),
+          );
+        }
+
+        if (missingSupplierNames.length) {
+          const { data, error } = await supabase
+            .from("suppliers")
+            .insert(
+              missingSupplierNames.map((name) => ({
+                business_id: context.businessId,
+                name,
+              })),
+            )
+            .select("id, name");
+          if (error) throw error;
+          ((data ?? []) as IngredientLookup[]).forEach((supplier) =>
+            supplierMap.set(normalizeTextKey(supplier.name), supplier),
+          );
+        }
+      }
+
+      const skippedAtSave: IngredientImportDraftRow[] = [];
+      const addPayload: Record<string, unknown>[] = [];
+      const updatePayload: Record<string, unknown>[] = [];
+
+      rowsToImport.forEach((row) => {
+        const categoryId = row.category
+          ? categoryMap.get(normalizeTextKey(row.category))?.id
+          : null;
+        const supplierId = row.supplier
+          ? supplierMap.get(normalizeTextKey(row.supplier))?.id
+          : null;
+        if ((row.category && !categoryId) || (row.supplier && !supplierId)) {
+          skippedAtSave.push({
+            ...row,
+            result: "Skipped",
+            message: "Category or supplier could not be resolved at save time.",
+          });
+          return;
+        }
+
+        const payload = {
+          business_id: context.businessId,
+          category_id: categoryId ?? null,
+          supplier_id: supplierId ?? null,
+          name: row.name,
+          description: null,
+          sku: row.sku || null,
+          purchase_quantity: row.purchaseQuantity,
+          purchase_uom: row.purchaseUnit,
+          purchase_cost: row.purchaseCost,
+          recipe_base_uom: row.baseUnit,
+          cost_per_base_unit: row.costPerBaseUnit,
+          default_wastage_percentage: row.wastePercentage,
+          notes: row.notes || null,
+          is_active: row.active,
+          created_by: context.userId,
+        };
+
+        if (row.result === "Ready to Update" && row.existingId) {
+          updatePayload.push({ id: row.existingId, ...payload });
+        } else {
+          addPayload.push(payload);
+        }
+      });
+
+      if (addPayload.length) {
+        const { error } = await supabase.from("ingredients").insert(addPayload);
+        if (error) throw error;
+      }
+      if (updatePayload.length) {
+        const { error } = await supabase
+          .from("ingredients")
+          .upsert(updatePayload, { onConflict: "id" });
+        if (error) throw error;
+      }
+
+      const summary = ingredientImportSummary(importRows);
+      const skippedRows =
+        summary.duplicates + summary.skippedRows + skippedAtSave.length;
+      const invalidRows = summary.invalidRows;
+      const errorRows = importRows.filter((row) =>
+        ["Duplicate", "Invalid", "Skipped"].includes(row.result),
+      );
+      const errorSummary = [
+        ...errorRows,
+        ...skippedAtSave,
+      ]
+        .slice(0, 20)
+        .map((row) => `Row ${row.rowNumber}: ${row.message}`)
+        .join(" | ");
+
+      let auditWarning = false;
+      const { data: auditData, error: auditError } = await supabase
+        .from("ingredient_imports")
+        .insert({
+          business_id: context.businessId,
+          file_name: importFileName || "ingredient-import",
+          file_type: importFileName.toLowerCase().endsWith(".xlsx") ? "xlsx" : "csv",
+          import_mode: importMode,
+          imported_by: context.userId,
+          total_rows: summary.totalRows,
+          added_rows: addPayload.length,
+          updated_rows: updatePayload.length,
+          skipped_rows: skippedRows,
+          invalid_rows: invalidRows,
+          error_summary: errorSummary || null,
+        })
+        .select("id")
+        .maybeSingle();
+
+      if (!auditError && auditData?.id) {
+        const rowAuditPayload = [...importRows, ...skippedAtSave].map((row) => ({
+          import_id: auditData.id,
+          business_id: context.businessId,
+          original_row_number: row.rowNumber,
+          imported_values: row.values as Json,
+          import_result: row.result,
+          validation_message: row.message || null,
+        }));
+        if (rowAuditPayload.length) {
+          const { error } = await supabase
+            .from("ingredient_import_rows")
+            .insert(rowAuditPayload);
+          if (error) auditWarning = true;
+        }
+      } else if (auditError) {
+        auditWarning = true;
+      }
+
+      await loadSupabaseData();
+      setImportDialogOpen(false);
+      clearIngredientImport();
+
+      const actionSummary = [
+        addPayload.length ? `${addPayload.length} ingredients added` : "",
+        updatePayload.length ? `${updatePayload.length} ingredients updated` : "",
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      if (auditWarning) {
+        showToast(
+          "warning",
+          `${actionSummary}. Import audit could not be saved; apply the Supabase import audit migration.`,
+        );
+      } else if (skippedRows || invalidRows) {
+        showToast(
+          "warning",
+          `${actionSummary}. ${skippedRows + invalidRows} rows were skipped due to validation errors.`,
+        );
+      } else {
+        showToast("success", `${actionSummary}.`);
+      }
+    } catch (error) {
+      showToast(
+        "failed",
+        normalizeSupabaseError(error) ||
+          "The ingredient file could not be imported. Review the file format and try again.",
+      );
+    } finally {
+      setImportProcessing(false);
+    }
+  };
+
   const updateIngredient = (id: string, patch: Partial<Ingredient>) => {
     const currentIngredient = ingredients.find((ingredient) => ingredient.id === id);
     if (!currentIngredient) return;
@@ -1173,9 +1901,25 @@ export default function RecipeCostApp({
     void runSupabaseMutation("Saving ingredient", "Ingredient saved.", async () => {
       const context = requireBusinessContext();
       const supabase = createSupabaseBrowserClient();
+      const categoryId =
+        "category" in patch
+          ? (ingredientCategories.find(
+              (category) =>
+                normalizeTextKey(category.name) === normalizeTextKey(nextIngredient.category),
+            )?.id ?? null)
+          : (nextIngredient.categoryId ?? null);
+      const supplierId =
+        "supplier" in patch
+          ? (ingredientSuppliers.find(
+              (supplier) =>
+                normalizeTextKey(supplier.name) === normalizeTextKey(nextIngredient.supplier),
+            )?.id ?? null)
+          : (nextIngredient.supplierId ?? null);
       const { error } = await supabase
         .from("ingredients")
         .update({
+          category_id: categoryId,
+          supplier_id: supplierId,
           name: nextIngredient.name,
           description: nextIngredient.description,
           sku: nextIngredient.sku || null,
@@ -1894,7 +2638,7 @@ export default function RecipeCostApp({
             : pathname === "/" || pathname === "/dashboard"
               ? renderDashboard()
               : pathname === "/ingredients"
-                ? renderIngredientsBible()
+                ? renderIngredientsList()
                 : pathname === "/recipes"
                   ? renderRecipesList()
                   : pathname === "/recipes/new" ||
@@ -1926,7 +2670,7 @@ export default function RecipeCostApp({
         <nav>
           {[
             ["D", "Dashboard", "/dashboard"],
-            ["I", "Ingredients Bible", "/ingredients"],
+            ["I", "Ingredients List", "/ingredients"],
             ["R", "Recipes", "/recipes"],
             ["P", "Productions", "/productions"],
             ["A", "Reports", "/reports"],
@@ -2095,20 +2839,71 @@ export default function RecipeCostApp({
     );
   }
 
-  function renderIngredientsBible() {
-    const categories = ["All", ...Array.from(new Set(ingredients.map((item) => item.category)))];
-    const suppliers = ["All", ...Array.from(new Set(ingredients.map((item) => item.supplier)))];
+  function renderIngredientsList() {
+    const categories = [
+      "All",
+      ...Array.from(
+        new Set([
+          ...ingredientCategories.map((item) => item.name),
+          ...ingredients.map((item) => item.category).filter(Boolean),
+        ]),
+      ),
+    ];
+    const suppliers = [
+      "All",
+      ...Array.from(
+        new Set([
+          ...ingredientSuppliers.map((item) => item.name),
+          ...ingredients.map((item) => item.supplier).filter(Boolean),
+        ]),
+      ),
+    ];
+    const hasImportErrors = importRows.some((row) =>
+      ["Duplicate", "Invalid", "Skipped"].includes(row.result),
+    );
     return (
       <section className="page-stack">
         <section className="panel">
           <div className="section-title">
             <div>
-              <h2>Ingredients Bible</h2>
-              <p>Central ingredient library used by all recipe formula lines.</p>
+              <h2>Ingredients List</h2>
+              <p>Maintain ingredients, purchase costs, suppliers and recipe units.</p>
             </div>
-            <button type="button" className="compact-button" onClick={createIngredient}>
-              + Ingredient
-            </button>
+            <div className="ingredient-header-actions">
+              <button type="button" className="compact-button" onClick={openIngredientImportDialog}>
+                Import
+              </button>
+              <div className="action-menu-wrap">
+                <button
+                  type="button"
+                  className="compact-button"
+                  aria-expanded={exportMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setExportMenuOpen((current) => !current)}
+                >
+                  Export
+                </button>
+                {exportMenuOpen ? (
+                  <div className="compact-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={downloadCurrentIngredientsXlsx}>
+                      Export Current Ingredient List as XLSX
+                    </button>
+                    <button type="button" role="menuitem" onClick={downloadCurrentIngredientsCsv}>
+                      Export Current Ingredient List as CSV
+                    </button>
+                    <button type="button" role="menuitem" onClick={downloadIngredientTemplateXlsx}>
+                      Download XLSX Import Template
+                    </button>
+                    <button type="button" role="menuitem" onClick={downloadIngredientTemplateCsv}>
+                      Download CSV Import Template
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <button type="button" className="primary-button" onClick={createIngredient}>
+                + Ingredient
+              </button>
+            </div>
           </div>
           <div className="filter-bar">
             <input
@@ -2145,7 +2940,7 @@ export default function RecipeCostApp({
               <option>Inactive</option>
             </select>
           </div>
-          <div className="sheet ingredient-bible-sheet" role="table">
+          <div className="sheet ingredient-list-sheet" role="table">
             <div className="sheet-head" role="row">
               <span role="columnheader">Ingredient</span>
               <span role="columnheader">Category</span>
@@ -2282,6 +3077,34 @@ export default function RecipeCostApp({
                 </span>
               </div>
             ))}
+            {filteredIngredients.length === 0 ? (
+              <div className="sheet-empty ingredients-empty-state">
+                <strong>No ingredients found.</strong>
+                <span>
+                  Add your first ingredient manually or import an ingredient list using the XLSX
+                  or CSV template.
+                </span>
+                <div className="empty-actions">
+                  <button type="button" className="primary-button" onClick={createIngredient}>
+                    + Ingredient
+                  </button>
+                  <button
+                    type="button"
+                    className="compact-button"
+                    onClick={openIngredientImportDialog}
+                  >
+                    Import Ingredients
+                  </button>
+                  <button
+                    type="button"
+                    className="compact-button"
+                    onClick={downloadIngredientTemplateXlsx}
+                  >
+                    Download Template
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
           <div className="mobile-records">
             {filteredIngredients.map((ingredient) => (
@@ -2328,9 +3151,214 @@ export default function RecipeCostApp({
                 </div>
               </details>
             ))}
+            {filteredIngredients.length === 0 ? (
+              <div className="sheet-record empty-record">
+                <strong>No ingredients found.</strong>
+                <p>
+                  Add your first ingredient manually or import an ingredient list using the XLSX
+                  or CSV template.
+                </p>
+                <div className="record-actions">
+                  <button type="button" className="primary-button" onClick={createIngredient}>
+                    + Ingredient
+                  </button>
+                  <button
+                    type="button"
+                    className="compact-button"
+                    onClick={openIngredientImportDialog}
+                  >
+                    Import Ingredients
+                  </button>
+                  <button
+                    type="button"
+                    className="compact-button"
+                    onClick={downloadIngredientTemplateXlsx}
+                  >
+                    Download Template
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
+        {importDialogOpen ? renderIngredientImportDialog(hasImportErrors) : null}
       </section>
+    );
+  }
+
+  function renderIngredientImportDialog(hasImportErrors: boolean) {
+    const summary = ingredientImportSummary(importRows);
+    const readyCount = summary.readyToAdd + summary.readyToUpdate;
+    return (
+      <div className="dialog-backdrop" role="presentation">
+        <section
+          className="import-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ingredient-import-title"
+        >
+          <div className="section-title">
+            <div>
+              <h2 id="ingredient-import-title">Import Ingredients</h2>
+              <p>Validate the complete file, preview rows, then save the valid records.</p>
+            </div>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Close import dialog"
+              onClick={() => setImportDialogOpen(false)}
+            >
+              X
+            </button>
+          </div>
+
+          <div className="import-toolbar">
+            <label className="compact-file-input">
+              <input
+                ref={importFileInputRef}
+                type="file"
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={handleIngredientFileChange}
+              />
+              <span>{importFileName || "Choose CSV or XLSX"}</span>
+            </label>
+            <button type="button" className="compact-button" onClick={downloadIngredientTemplateXlsx}>
+              XLSX Template
+            </button>
+            <button type="button" className="compact-button" onClick={downloadIngredientTemplateCsv}>
+              CSV Template
+            </button>
+          </div>
+
+          <div className="form-grid two import-settings">
+            <Field label="Import mode">
+              <select
+                value={importMode}
+                onChange={(event) =>
+                  setImportMode(event.target.value as IngredientImportMode)
+                }
+              >
+                <option value="add-only">Add New Only</option>
+                <option value="add-update">Add New and Update Existing</option>
+              </select>
+            </Field>
+            <Field label="Category and supplier handling">
+              <select
+                value={missingLookupMode}
+                onChange={(event) =>
+                  setMissingLookupMode(event.target.value as MissingLookupMode)
+                }
+              >
+                <option value="create">Create missing categories and suppliers</option>
+                <option value="reject">Reject rows with missing categories or suppliers</option>
+              </select>
+            </Field>
+          </div>
+
+          <div className="import-summary" aria-label="Import summary">
+            <span>Total rows <strong>{summary.totalRows}</strong></span>
+            <span>Ready to add <strong>{summary.readyToAdd}</strong></span>
+            <span>Ready to update <strong>{summary.readyToUpdate}</strong></span>
+            <span>Duplicates <strong>{summary.duplicates}</strong></span>
+            <span>Invalid rows <strong>{summary.invalidRows}</strong></span>
+          </div>
+
+          <div className="sheet import-preview-sheet" role="table">
+            <div className="sheet-head" role="row">
+              <span role="columnheader">Row</span>
+              <span role="columnheader">Ingredient Name</span>
+              <span role="columnheader">Category</span>
+              <span role="columnheader">Supplier</span>
+              <span role="columnheader">SKU</span>
+              <span role="columnheader">Purchase Qty</span>
+              <span role="columnheader">Purchase UOM</span>
+              <span role="columnheader">Purchase Cost</span>
+              <span role="columnheader">Base UOM</span>
+              <span role="columnheader">Cost/Base</span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Import Result</span>
+              <span role="columnheader">Validation Message</span>
+            </div>
+            {importRows.map((row) => (
+              <div className="sheet-row" role="row" key={`${row.rowNumber}-${row.name}`}>
+                <span role="cell">{row.rowNumber}</span>
+                <span role="cell"><strong>{row.name || "Unnamed"}</strong></span>
+                <span role="cell">{row.category || "Unassigned"}</span>
+                <span role="cell">{row.supplier || "Unassigned"}</span>
+                <span role="cell" className="muted-cell">{row.sku || "-"}</span>
+                <span role="cell" className="numeric-cell">{formatNumber(row.purchaseQuantity, 3)}</span>
+                <span role="cell">{row.purchaseUnit || "-"}</span>
+                <span role="cell" className="numeric-cell">{formatCurrency(row.purchaseCost)}</span>
+                <span role="cell">{row.baseUnit || "-"}</span>
+                <span role="cell" className="numeric-cell">{formatCurrency(row.costPerBaseUnit, 4)}</span>
+                <span role="cell">{row.active ? "Active" : "Inactive"}</span>
+                <span role="cell"><strong className={`status-chip import-result-${row.result.toLowerCase().replaceAll(" ", "-")}`}>{row.result}</strong></span>
+                <span role="cell" className="muted-cell">{row.message}</span>
+              </div>
+            ))}
+            {importRows.length === 0 ? (
+              <div className="sheet-empty">
+                Select a CSV or XLSX ingredient file to validate and preview rows.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mobile-records import-mobile-records">
+            {importRows.map((row) => (
+              <details className="sheet-record" key={`mobile-${row.rowNumber}-${row.name}`}>
+                <summary>
+                  <span>
+                    <strong>Row {row.rowNumber}: {row.name || "Unnamed"}</strong>
+                    <small>{row.result}</small>
+                  </span>
+                  <span>{formatCurrency(row.costPerBaseUnit, 4)}</span>
+                </summary>
+                <div className="record-grid">
+                  <div className="record-metric"><span>Category</span><strong>{row.category || "Unassigned"}</strong></div>
+                  <div className="record-metric"><span>Supplier</span><strong>{row.supplier || "Unassigned"}</strong></div>
+                  <div className="record-metric"><span>Purchase</span><strong>{formatNumber(row.purchaseQuantity, 3)} {row.purchaseUnit}</strong></div>
+                  <div className="record-metric"><span>Status</span><strong>{row.active ? "Active" : "Inactive"}</strong></div>
+                  <div className="record-metric full-record-field"><span>Validation</span><strong>{row.message}</strong></div>
+                </div>
+              </details>
+            ))}
+          </div>
+
+          <div className="import-dialog-footer">
+            <div className="dialog-secondary-actions">
+              {hasImportErrors ? (
+                <>
+                  <button
+                    type="button"
+                    className="compact-button"
+                    onClick={exportIngredientErrorReportXlsx}
+                  >
+                    Error XLSX
+                  </button>
+                  <button
+                    type="button"
+                    className="compact-button"
+                    onClick={exportIngredientErrorReportCsv}
+                  >
+                    Error CSV
+                  </button>
+                </>
+              ) : null}
+              <button type="button" className="compact-button" onClick={clearIngredientImport}>
+                Clear
+              </button>
+            </div>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={importProcessing || readyCount === 0}
+              onClick={confirmIngredientImport}
+            >
+              {importProcessing ? "Importing..." : `Confirm Import (${readyCount})`}
+            </button>
+          </div>
+        </section>
+      </div>
     );
   }
 
@@ -2547,7 +3575,7 @@ export default function RecipeCostApp({
           <div className="section-title">
             <div>
               <h2>Base Formula</h2>
-              <p>Formula lines select linked records from the Ingredients Bible.</p>
+              <p>Formula lines select linked records from the Ingredients List.</p>
             </div>
             {!isReadOnly ? (
               <button type="button" className="compact-button" onClick={() => addFormulaLine(recipe.id)}>
@@ -3346,8 +4374,8 @@ function pageTitleForPath(pathname: string) {
   }
   if (pathname === "/ingredients") {
     return {
-      title: "Ingredients Bible",
-      description: "Maintain linked ingredients and purchase-cost calculations.",
+      title: "Ingredients List",
+      description: "Maintain ingredients, purchase costs, suppliers and recipe units.",
     };
   }
   if (pathname.startsWith("/recipes/")) {

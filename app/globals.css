@@ -567,13 +567,22 @@ a {
     minmax(112px, 1fr) minmax(98px, 0.8fr) 56px;
 }
 
-.ingredient-bible-sheet .sheet-head,
-.ingredient-bible-sheet .sheet-row {
+.ingredient-list-sheet .sheet-head,
+.ingredient-list-sheet .sheet-row {
   grid-template-columns:
     minmax(116px, 1.2fr) minmax(82px, 0.72fr) minmax(96px, 0.86fr)
     minmax(88px, 0.76fr) minmax(132px, 1fr) minmax(74px, 0.62fr)
     minmax(68px, 0.55fr) minmax(86px, 0.72fr) minmax(62px, 0.48fr)
     minmax(68px, 0.56fr) 88px;
+}
+
+.import-preview-sheet .sheet-head,
+.import-preview-sheet .sheet-row {
+  grid-template-columns:
+    38px minmax(90px, 1fr) minmax(72px, 0.72fr) minmax(82px, 0.82fr)
+    minmax(72px, 0.72fr) minmax(68px, 0.62fr) minmax(58px, 0.56fr)
+    minmax(74px, 0.66fr) minmax(58px, 0.56fr) minmax(76px, 0.68fr)
+    minmax(58px, 0.52fr) minmax(94px, 0.9fr) minmax(128px, 1.35fr);
 }
 
 .recipes-list-sheet .sheet-head,
@@ -843,6 +852,200 @@ a {
   grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(120px, 0.45fr));
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.ingredient-header-actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.action-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.compact-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  width: min(282px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(22, 24, 29, 0.12);
+  padding: 4px;
+}
+
+.compact-menu button {
+  justify-content: flex-start;
+  width: 100%;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--foreground);
+  padding-inline: 8px;
+  text-align: left;
+}
+
+.compact-menu button:hover {
+  background: var(--surface-muted);
+}
+
+.ingredients-empty-state {
+  display: grid;
+  gap: 6px;
+}
+
+.ingredients-empty-state strong,
+.empty-record strong {
+  color: var(--foreground);
+}
+
+.ingredients-empty-state span,
+.empty-record p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(246, 247, 248, 0.72);
+  padding: 16px;
+}
+
+.import-dialog {
+  display: grid;
+  width: min(1120px, 100%);
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 56px rgba(22, 24, 29, 0.16);
+  padding: 12px;
+}
+
+.import-toolbar,
+.import-dialog-footer,
+.dialog-secondary-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.import-toolbar {
+  margin-bottom: 8px;
+}
+
+.compact-file-input {
+  display: inline-flex;
+  align-items: center;
+  min-width: min(260px, 100%);
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+.compact-file-input input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.compact-file-input span {
+  overflow: hidden;
+  padding: 0 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-settings {
+  margin-bottom: 8px;
+}
+
+.import-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  overflow: hidden;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.import-summary span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  padding: 7px 8px;
+}
+
+.import-summary span:last-child {
+  border-right: 0;
+}
+
+.import-summary strong {
+  color: var(--foreground);
+  font-size: 16px;
+}
+
+.import-result-ready-to-add,
+.import-result-ready-to-update {
+  border-color: #b9dfc4;
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.import-result-duplicate,
+.import-result-skipped {
+  border-color: #e6b96b;
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.import-result-invalid {
+  border-color: #ef9a96;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.import-dialog-footer {
+  justify-content: space-between;
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.import-mobile-records {
+  display: none;
+}
+
+.full-record-field {
+  grid-column: 1 / -1;
 }
 
 .inline-strip {
@@ -1204,8 +1407,9 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .ingredient-bible-sheet,
-  .recipes-list-sheet {
+  .ingredient-list-sheet,
+  .recipes-list-sheet,
+  .import-preview-sheet {
     display: none;
   }
 
@@ -1230,6 +1434,7 @@ a {
   }
 
   .filter-bar,
+  .import-summary,
   .summary-grid,
   .settings-grid,
   .subnav-grid {
@@ -1237,6 +1442,7 @@ a {
   }
 
   .summary-cell,
+  .import-summary span,
   .settings-grid div,
   .subnav-tile {
     border-right: 0;
@@ -1244,9 +1450,14 @@ a {
   }
 
   .summary-cell:last-child,
+  .import-summary span:last-child,
   .settings-grid div:last-child,
   .subnav-tile:last-child {
     border-bottom: 0;
+  }
+
+  .import-mobile-records {
+    display: block;
   }
 }
 
@@ -1280,14 +1491,42 @@ a {
   }
 
   .section-title,
-  .topbar-actions {
+  .topbar-actions,
+  .ingredient-header-actions,
+  .import-dialog-footer,
+  .dialog-secondary-actions {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .section-title .compact-button,
-  .section-title .primary-button {
+  .section-title .primary-button,
+  .ingredient-header-actions,
+  .ingredient-header-actions .compact-button,
+  .ingredient-header-actions .primary-button,
+  .import-dialog-footer .primary-button,
+  .dialog-secondary-actions,
+  .dialog-secondary-actions .compact-button {
     width: 100%;
+  }
+
+  .action-menu-wrap,
+  .compact-file-input {
+    width: 100%;
+  }
+
+  .compact-menu {
+    right: auto;
+    left: 0;
+  }
+
+  .dialog-backdrop {
+    align-items: stretch;
+    padding: 8px;
+  }
+
+  .import-dialog {
+    max-height: calc(100vh - 16px);
   }
 
   .method-step {

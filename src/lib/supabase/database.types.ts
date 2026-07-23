@@ -398,6 +398,39 @@ export type Database = {
         Insert: Insert<Database["public"]["Tables"]["audit_logs"]["Row"]>;
         Update: Update<Database["public"]["Tables"]["audit_logs"]["Row"]>;
       };
+      ingredient_imports: {
+        Row: Row<{
+          id: string;
+          business_id: string;
+          file_name: string;
+          file_type: string;
+          import_mode: string;
+          imported_by: string | null;
+          imported_at: string;
+          total_rows: number;
+          added_rows: number;
+          updated_rows: number;
+          skipped_rows: number;
+          invalid_rows: number;
+          error_summary: string | null;
+        }>;
+        Insert: Insert<Database["public"]["Tables"]["ingredient_imports"]["Row"]>;
+        Update: Update<Database["public"]["Tables"]["ingredient_imports"]["Row"]>;
+      };
+      ingredient_import_rows: {
+        Row: Row<{
+          id: string;
+          import_id: string;
+          business_id: string;
+          original_row_number: number;
+          imported_values: Json;
+          import_result: string;
+          validation_message: string | null;
+          created_at: string;
+        }>;
+        Insert: Insert<Database["public"]["Tables"]["ingredient_import_rows"]["Row"]>;
+        Update: Update<Database["public"]["Tables"]["ingredient_import_rows"]["Row"]>;
+      };
       units_of_measure: {
         Row: Row<{
           code: string;

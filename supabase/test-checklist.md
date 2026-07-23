@@ -9,7 +9,7 @@ Run this checklist after applying migrations to the target Supabase project.
 - Confirm a signed-in user without `business_users` access sees the no-business state.
 - Confirm a signed-in business user can load dashboard counts.
 
-## Ingredients Bible
+## Ingredients List
 
 - Create an ingredient.
 - Edit name, SKU, purchase quantity, purchase cost, base UOM and wastage.

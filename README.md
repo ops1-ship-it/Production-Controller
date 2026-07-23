@@ -53,7 +53,7 @@ Supabase setup files:
 ## Application Routes
 
 - `/dashboard`: operational summary.
-- `/ingredients`: Ingredients Bible with search, filters, inline costing, duplicate, and archive actions.
+- `/ingredients`: Ingredients List with search, filters, inline costing, import/export templates, duplicate, and archive actions.
 - `/recipes`: saved recipe library with view, edit, duplicate, production, archive, and delete actions.
 - `/recipes/new`: create a recipe.
 - `/recipes/[recipeId]`: read-only recipe detail.

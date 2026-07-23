@@ -33,7 +33,7 @@ test("server-renders the routed recipe costing application", async () => {
   const html = await response.text();
   assert.match(html, /<title>Recipe Cost Calculator<\/title>/i);
   assert.match(html, />Dashboard</);
-  assert.match(html, /Ingredients Bible/);
+  assert.match(html, /Ingredients List/);
   assert.match(html, />Recipes</);
   assert.match(html, />Productions</);
   assert.match(html, />Reports</);
@@ -63,7 +63,7 @@ test("renders independent ingredient, recipe and production routes", async () =>
     productionResponse.text(),
   ]);
 
-  assert.match(ingredientsHtml, /Ingredients Bible/);
+  assert.match(ingredientsHtml, /Ingredients List/);
   assert.match(ingredientsHtml, /Supabase backend/);
   assert.match(ingredientsHtml, /Connecting to Supabase/);
 
@@ -102,7 +102,9 @@ test("keeps starter preview code removed and includes Supabase setup", async () 
   assert.match(page, /createSupabaseBrowserClient/);
   assert.match(page, /signInWithOtp/);
   assert.match(page, /const deleteRecipe/);
-  assert.match(page, /Ingredients Bible/);
+  assert.match(page, /Ingredients List/);
+  assert.match(page, /Export Current Ingredient List as XLSX/);
+  assert.match(page, /Download CSV Import Template/);
   assert.match(page, /Calculated production ingredients/);
   assert.match(page, /Markup/);
   assert.match(page, /Gross Margin/);
@@ -110,7 +112,8 @@ test("keeps starter preview code removed and includes Supabase setup", async () 
   assert.match(layout, /og\.png/);
   assert.match(css, /grid-template-columns: minmax\(0, 1fr\) 188px/);
   assert.match(css, /@media \(max-width: 820px\)/);
-  assert.match(css, /\.ingredient-bible-sheet/);
+  assert.match(css, /\.ingredient-list-sheet/);
+  assert.match(css, /\.import-preview-sheet/);
   assert.match(css, /\.recipes-list-sheet/);
   assert.match(css, /\.mobile-records/);
   assert.match(css, /\.mobile-bottom-nav/);

@@ -21,7 +21,7 @@ Apply migrations from `supabase/migrations/` in timestamp order. The initial
 migration creates:
 
 - businesses, locations, profiles and access tables
-- Ingredients Bible, categories and suppliers
+- Ingredients List, categories and suppliers
 - recipes, recipe versions, formula lines and method steps
 - production batches, ingredient snapshots, method snapshots, costs, notes and images
 - audit logs
